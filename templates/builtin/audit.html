@@ -2,9 +2,12 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
 <title>{{title}} · {{endpoint}} · {{channel}}</title>
 <style>
 :root{
+  color-scheme:light;
   --bg:#eef1f5; --surface:#ffffff; --surface2:#f6f8fb; --line:#d8dee8;
   --text:#1a2230; --muted:#5d6b80; --faint:#8895a8;
   --accent:#2456b8; --accent-fill:rgba(36,86,184,.07); --dot:#2456b8;
@@ -41,6 +44,14 @@ body{margin:0;color:var(--text);background:var(--bg);
   border-top:1px solid var(--line);padding-top:14px}
 .foot code{color:var(--muted);font-family:ui-monospace,Menlo,monospace}
 {{{base_css}}}
+/* 三层披露区块标题（与 aurora 保持一致的语义，字号按审计风格收紧） */
+.sec{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 0 14px;
+  padding-bottom:10px;border-bottom:1px solid var(--line)}
+.sec h3{font-size:13px;font-weight:700;margin:0;letter-spacing:.4px}
+.sec .note{color:var(--faint);font-size:11px;margin-left:auto}
+.sec .idx{font:600 10.5px/1 ui-monospace,Menlo,monospace;color:var(--accent);
+  background:var(--accent-fill);border-radius:4px;padding:5px 7px;letter-spacing:.4px}
+
 /* 审计风格组件微调 */
 .minitab-hero{padding:0;border:1px solid var(--line)}
 .hero-head{padding:12px 18px;background:var(--surface2);border-bottom:1px solid var(--line)}
@@ -57,41 +68,25 @@ body{margin:0;color:var(--text);background:var(--bg);
       <h1>过程能力分析报告</h1>
       <p>{{subtitle}}</p>
     </div></div>
-    <div class="stamp">报告编号 <b>{{channel}}</b><br>生成日期 <b>{{generated_at}}</b><br>数据来源 <b>{{source}}</b></div>
+    <div class="stamp">报告编号 <b>{{report_no}}</b><br>生成时间 <b>{{generated_at}}</b><br>数据来源 <b>{{source}}</b></div>
   </div>
 
-  {{{minitab_chart}}}
+  {{{verdict_hero}}}
 
-  <div class="card">
-    <div class="verdict">
-      <div class="grade" style="color:{{verdict_color}}">{{grade}}</div>
-      <div><h2 style="color:{{verdict_color}}">{{verdict}}</h2>
-      <p>依据 Cpk = <b>{{cpk}}</b> 判定 · 规格 {{spec}} · 子组大小 {{group_size}} · 样本量 {{sample_n}}</p></div>
-    </div>
-    <div class="section-head"><h3>核心能力指数</h3><span>组内 / 整体</span></div>
-    {{{kpis}}}
-  </div>
+  {{{gate_strip}}}
 
-  {{{interpretation}}}
+  {{{evidence_control}}}
 
-  <div class="card">
-    <div class="section-head"><h3>数据分布与规格限</h3><span>图 2 · 观测值与拟合分布</span></div>
-    {{{distribution}}}
-    <div class="legend">
-      <span><i style="background:var(--accent)"></i>拟合分布 / 均值</span>
-      <span><i style="background:var(--danger)"></i>规格限 LSL / USL</span>
-      <span><i style="background:var(--target)"></i>目标值</span>
-      <span><i style="background:var(--dot)"></i>观测点</span>
-    </div>
-  </div>
+  {{{evidence_capability}}}
 
-  <div class="two">
-    <div class="card"><div class="section-head"><h3>能力指数</h3><span>index</span></div>{{{index_rows}}}</div>
-    <div class="card"><div class="section-head"><h3>过程特性</h3><span>statistics</span></div>{{{stat_rows}}}</div>
-  </div>
+  {{{action_plan}}}
 
-  <div class="card"><div class="section-head"><h3>原始数据</h3><span>{{variable}}</span></div>{{{raw_data}}}</div>
-  <div class="card"><div class="section-head"><h3>产出物链接</h3><span>Minitab</span></div>{{{links}}}</div>
+  <div class="appendix-head">附录 · 完整输出与原始数据（点击展开）</div>
+  {{{appendix_minitab}}}
+  {{{appendix_normality}}}
+  {{{appendix_metrics}}}
+  {{{appendix_interpret}}}
+  {{{appendix_data}}}
 
   <div class="foot">
     BQL MCP Connector · 结果来源 <code>{{source}}</code> · 频道 <code>{{channel}}</code><br>

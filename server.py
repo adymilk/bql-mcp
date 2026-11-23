@@ -22,6 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 import report as report_module
+import quality as quality_module
 import report_templates
 import interpret as interpret_module
 
@@ -60,8 +61,36 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "report": {
         "template": "aurora",
+        "auto_open": True,
+        # 放行判决阈值：Cpk ≥ release_cpk 且受控 → 放行；≥ hold_cpk → 有条件放行；否则拒收
+        "disposition": {
+            "release_cpk": 1.33,
+            "hold_cpk": 1.00,
+        },
     },
 }
+
+# MCP 协议层的使用纪律：initialize 时下发给宿主，所有 Agent 都会读。
+# 这是唯一不依赖具体客户端（WorkBuddy / Cursor / Claude Desktop / Codex）的输出约定位置。
+INSTRUCTIONS = """\
+这是 BQL（Minitab 质量分析服务）连接器，面向 SPC / 过程能力分析。
+
+输出纪律（每次调用后严格遵守）：
+1. bql_full_analysis / bql_quick_analysis 成功后，直接输出返回的 answer 字段原文，并保留其中的报告链接。
+2. 不要复述返回值里的字段，不要逐项罗列 Cpk/Ppk/Cp/Pp/σ/ppm 等指标，不要重复解释判定规则。
+3. 报告首屏已经是结论：放行判决 + 三个数字 + 判定状态条。不要在对话里复述判决理由、
+   不要把「受控/正态/能力」三层再讲一遍，也不要抄附录里的图表与数据。
+4. 用户在追问时（"为什么"、"怎么改"、"再细说"）才展开解读，展开内容以报告里的结论带与改善建议为准，不要自己另编一套。
+5. 报告默认使用 config.json 中 report.template 指定的模板（默认 aurora，白色）渲染，无需每次传模板。
+6. 若用户明确要求"换模板/换配色/导出 Word/PPT"，再调用 bql_set_template 或 bql_export。
+
+默认流程：bql_full_analysis 一步出完整报告（能力 + 控制图 + 正态性）→ 报告自动打开 → 对话里只留两三行结论。
+只有用户明确说"只要个 Cpk 数字"时，才用更轻的 bql_quick_analysis。
+"""
+
+
+def report_should_auto_open(config: dict[str, Any]) -> bool:
+    return bool((config.get("report") or {}).get("auto_open", True))
 
 WEBHOOK_RESULTS: dict[str, Any] = {}
 WEBHOOK_LOCK = threading.Lock()
@@ -72,7 +101,7 @@ _webhook_thread: Optional[threading.Thread] = None
 _LAST_REPORT: Optional[str] = None
 _LAST_BROADCAST: Optional[dict[str, Any]] = None
 
-mcp = FastMCP("bql")
+mcp = FastMCP("bql", instructions=INSTRUCTIONS)
 
 
 def deep_merge(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
@@ -577,6 +606,7 @@ async def execute_analysis(
     channel: Optional[str] = None,
     timeout_seconds: Optional[int] = None,
     include_raw: bool = False,
+    render: bool = True,
 ) -> dict[str, Any]:
     config = load_config()
     require_runtime_config(config)
@@ -630,10 +660,25 @@ async def execute_analysis(
         normalized["interpretation"] = interpret_module.from_result(normalized, body)
     except Exception as exc:
         normalized["interpret_error"] = f"解读生成失败：{exc}"
+    if not render:
+        if not include_raw:
+            normalized.pop("raw", None)
+        return normalized
+
     try:
         template_name = str((config.get("report") or {}).get("template") or "aurora")
+        extras = {}
+        if endpoint == "capa":
+            try:
+                extras = report_module.build_extra(
+                    normalized, body,
+                    disposition_cfg=(config.get("report") or {}).get("disposition"),
+                )
+            except Exception:
+                extras = {}
         report_path = report_module.render_report(
-            endpoint, body, normalized, channel, source, broadcast, template=template_name
+            endpoint, body, normalized, channel, source, broadcast,
+            template=template_name, extra=extras,
         )
         normalized["report_template"] = template_name
         global _LAST_REPORT
@@ -1000,7 +1045,10 @@ async def bql_quick_analysis(
 
     data 支持 [32,53,57] 或 "32,53,57" 或 [{"x":32},{"x":53}]；
     lspec/uspec 为规格下限/上限，target 可选。
-    返回精简结论（Cpk/Ppk/判定/报告路径/图表链接），适合对话里最快拿到结果。
+
+    报告会用 config.json 里的默认模板（默认 aurora 白色）自动渲染并打开。
+    调用成功后：只把返回的 answer 原文贴给用户（已含结论与报告链接），
+    不要复述字段、不要逐项解释指标；用户追问时再展开。
     """
     started = time.perf_counter()
     values = _numeric_series(data)
@@ -1021,22 +1069,221 @@ async def bql_quick_analysis(
     minitab = charts[0].get("minitab") if isinstance(charts[0], dict) else {}
     minitab = minitab if isinstance(minitab, dict) else {}
     out_of_spec = (report_module._num(metrics["out_usl"]) or 0) + (report_module._num(metrics["out_lsl"]) or 0)
+
+    cpk = report_module._fmt(metrics["cpk"], 3)
+    ppk = report_module._fmt(metrics["ppk"], 3)
+    report_path = result.get("report_path")
+    report_url = Path(report_path).as_uri() if report_path else ""
+
+    # 报告默认自动打开：用户要的是"看到结果"，不是"读到一段指标罗列"
+    opened = False
+    if report_url and report_should_auto_open(load_config()):
+        try:
+            opened = bool(webbrowser.open(report_url))
+        except Exception:
+            opened = False
+
+    interpretation = result.get("interpretation") or {}
+    headline = str(interpretation.get("headline") or "").strip()
+    answer = f"{variable}：Cpk {cpk} / Ppk {ppk} → {status['label']}（n={len(values)}，超差 {out_of_spec} 件）"
+    if report_url:
+        answer += f"\n报告：{report_url}"
+
     return {
         "ok": True,
+        # answer 就是给用户看的最终一段话，无需再加工
+        "answer": answer,
         "verdict": status["label"],
         "grade": status["grade"],
-        "cpk": report_module._fmt(metrics["cpk"], 3),
-        "ppk": report_module._fmt(metrics["ppk"], 3),
-        "mean": report_module._fmt(metrics["mean"], 3),
-        "std_within": report_module._fmt(metrics["wstd"], 3),
-        "std_overall": report_module._fmt(metrics["ostd"], 3),
+        "cpk": cpk,
+        "ppk": ppk,
         "n": len(values),
         "out_of_spec": out_of_spec,
-        "report_path": result.get("report_path"),
+        "report_path": report_path,
+        "report_url": report_url,
+        "report_template": result.get("report_template"),
+        "report_opened": opened,
         "chart_url": report_module._graph_url(result),
         "minitab_doc": minitab.get("mtbOutDoc"),
-        "interpretation": result.get("interpretation"),
+        # 一句话结论留存备用；完整三段式解读只在报告和 bql://metrics/{name} 资源里
+        "headline": headline,
+        "metrics_uri": result.get("metrics_uri"),
         "elapsed_ms": int((time.perf_counter() - started) * 1000),
+        "next": "把 answer 原文回给用户即可；不要复述其他字段，用户追问再展开解读。",
+    }
+
+
+@mcp.tool()
+async def bql_full_analysis(
+    data: Any,
+    lspec: float,
+    uspec: float,
+    target: Optional[float] = None,
+    group_size: int = 1,
+    analysis_type: str = "CStat",
+    variable: str = "测量值",
+    timeout_seconds: Optional[int] = None,
+) -> dict[str, Any]:
+    """一站式质量分析：过程能力 + 控制图 + 正态性检验，合成一份报告。
+
+    三个接口并发提交，报告按「受控 → 正态 → 能力」的专业顺序编排：
+    含控制限与判异、Anderson-Darling 正态性、Cpk 95% 置信下限、
+    Cpk/Ppk 差归因、中心化后的能力与所需 σ、MSA 提示、报告编号与元数据。
+
+    调用成功后只把 answer 原文贴给用户，不要复述字段；用户追问再展开。
+    """
+    started = time.perf_counter()
+    values = _numeric_series(data)
+    rows = [{variable: value} for value in values]
+
+    cap_payload: dict[str, Any] = {
+        "data": rows,
+        "variables": [variable],
+        "type": analysis_type,
+        "lspec": lspec,
+        "uspec": uspec,
+        "group_size": group_size,
+    }
+    if target is not None:
+        cap_payload["target"] = target
+
+    chart_endpoint = "xrchart" if group_size > 1 else "imrchart"
+    chart_kind = "xr" if group_size > 1 else "imr"
+    chart_payload: dict[str, Any] = {"data": rows, "variables": [variable]}
+    if group_size > 1:
+        chart_payload["group_size"] = group_size
+    norm_payload: dict[str, Any] = {"data": rows, "variables": [variable]}
+
+    cap_task = asyncio.create_task(
+        execute_analysis("capa", cap_payload, None, timeout_seconds, render=False)
+    )
+    chart_task = asyncio.create_task(
+        execute_analysis(chart_endpoint, chart_payload, None, timeout_seconds, render=False)
+    )
+    norm_task = asyncio.create_task(
+        execute_analysis("normtest", norm_payload, None, timeout_seconds, render=False)
+    )
+    cap_result, chart_result, norm_result = await asyncio.gather(
+        cap_task, chart_task, norm_task, return_exceptions=True
+    )
+    if isinstance(cap_result, BaseException):
+        raise cap_result
+    chart_result = None if isinstance(chart_result, BaseException) else chart_result
+    norm_result = None if isinstance(norm_result, BaseException) else norm_result
+
+    config = load_config()
+    template_name = str((config.get("report") or {}).get("template") or "aurora")
+    metrics = report_module.extract_metrics(cap_result, cap_payload)
+    status = report_module.capability_status(metrics["cpk"])
+    channel_name = str(cap_result.get("channel") or "")
+    now_text = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    report_no = "BQL-" + time.strftime("%Y%m%d") + "-" + re.sub(r"[^A-Za-z0-9]", "", channel_name)[-6:].upper()
+    meta = [
+        ("报告编号", report_no),
+        ("变量", variable),
+        ("规格", f"{lspec} / {uspec}" + (f"（目标 {target}）" if target is not None else "")),
+        ("样本量", f"{len(values)}"),
+        ("子组", f"{group_size}"),
+        ("分析接口", "capa · " + chart_endpoint + " · normtest"),
+        ("引擎", "Minitab / BQL"),
+        ("生成时间", now_text),
+        ("数据来源", channel_name),
+    ]
+
+    extra = report_module.build_extra(
+        cap_result, cap_payload, chart_result, norm_result,
+        control_kind=chart_kind, meta=meta,
+        disposition_cfg=(config.get("report") or {}).get("disposition"),
+    )
+    report_path = report_module.render_report(
+        "capa", cap_payload, cap_result, channel_name,
+        str(cap_result.get("source") or ""), cap_result.get("broadcast") or {},
+        template=template_name, extra=extra,
+    )
+    report_url = Path(report_path).as_uri()
+
+    # 后台把三张图内嵌成 base64，报告可离线归档
+    try:
+        report_module.embed_images_async(
+            Path(report_path),
+            [report_module._graph_url(cap_result),
+             report_module._graph_url(chart_result or {}),
+             report_module._graph_url(norm_result or {})],
+        )
+    except Exception:
+        pass
+
+    opened = False
+    if report_should_auto_open(config):
+        try:
+            opened = bool(webbrowser.open(report_url))
+        except Exception:
+            opened = False
+
+    cpk = report_module._fmt(metrics.get("cpk"), 3)
+    ppk = report_module._fmt(metrics.get("ppk"), 3)
+    out_of_spec = (report_module._num(metrics["out_usl"]) or 0) + (report_module._num(metrics["out_lsl"]) or 0)
+    norm_stats = report_module.normality_summary(norm_result, cap_payload)
+    control = report_module.control_summary(chart_result, cap_payload, chart_kind) if chart_result else {"available": False}
+    check = control.get("check") or {}
+
+    line2 = []
+    if control.get("available"):
+        if check.get("controlled"):
+            line2.append("受控：是")
+        else:
+            reasons = []
+            if check.get("beyond") or check.get("beyond_second"):
+                part = f"越限 {check.get('beyond') or 0} 点"
+                if check.get("beyond_second"):
+                    part = (f"{check.get('top_label') or 'I'} 图 {check.get('beyond') or 0} 点"
+                            f" / {check.get('second_label') or 'MR'} 图 {check['beyond_second']} 点")
+                reasons.append(part)
+            if check.get("rule2"):
+                reasons.append(f"连续同侧 {check.get('longest_run')} 点")
+            if check.get("rule3"):
+                reasons.append(f"单调趋势 {check.get('longest_trend')} 点")
+            line2.append("受控：否（" + " / ".join(reasons or ["异常信号"]) + "）")
+    if norm_stats:
+        line2.append(f"正态：{'是' if norm_stats.get('is_normal') else '否'}（AD {report_module._fmt(norm_stats.get('ad'), 3)}，p {report_module._fmt(norm_stats.get('p_value'), 3)}）")
+
+    disp = extra.get("disposition") or {}
+    cpk_lower = report_module._fmt(
+        quality_module.cpk_lower_bound(metrics.get("cpk"), metrics.get("n") or len(values)), 3
+    )
+    answer = (
+        f"{variable}：{disp.get('label') or status['label']}（{status['grade']} 级）"
+        f" · Cpk {cpk} / Ppk {ppk} · 95% 下限 {cpk_lower}"
+        f" · 超差 {out_of_spec} 件 / n={len(values)}"
+    )
+    if line2:
+        answer += "\n" + "｜".join(line2)
+    answer += f"\n报告：{report_url}"
+
+    return {
+        "ok": True,
+        "answer": answer,
+        "verdict": status["label"],
+        "grade": status["grade"],
+        "cpk": cpk,
+        "ppk": ppk,
+        "cpk_lower": cpk_lower,
+        "disposition": disp.get("label"),
+        "disposition_tone": disp.get("tone"),
+        "n": len(values),
+        "out_of_spec": out_of_spec,
+        "controlled": check.get("controlled") if control.get("available") else None,
+        "beyond_points": check.get("beyond"),
+        "is_normal": norm_stats.get("is_normal") if norm_stats else None,
+        "ad": report_module._fmt(norm_stats.get("ad"), 3) if norm_stats else None,
+        "p_value": report_module._fmt(norm_stats.get("p_value"), 3) if norm_stats else None,
+        "report_path": str(report_path),
+        "report_url": report_url,
+        "report_template": template_name,
+        "report_opened": opened,
+        "elapsed_ms": int((time.perf_counter() - started) * 1000),
+        "next": "把 answer 原文回给用户即可；不要复述其他字段，用户追问再展开解读。",
     }
 
 

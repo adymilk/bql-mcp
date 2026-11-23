@@ -27,6 +27,11 @@
     "port": 8765
   },
   "report": {
-    "template": "aurora"
+    "template": "aurora",
+    "auto_open": true,
+    "disposition": {
+      "release_cpk": 1.33,
+      "hold_cpk": 1.0
+    }
   }
 }

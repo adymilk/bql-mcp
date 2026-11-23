@@ -34,9 +34,10 @@ curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | B
 | 工具 | 作用 |
 |------|------|
 | `bql_configure` | 在对话里设置 BASE_URL / TOKEN / 结果通道等（无需打开网页） |
-| `bql_list_endpoints` | 列出已注册的分析接口（当前：capa） |
+| `bql_list_endpoints` | 列出已注册的分析接口（110 个，含控制图、正态性、MSA、DOE 等） |
 | `bql_describe_endpoint` | 查看某接口的必填/选填字段 |
-| `bql_quick_analysis` | **推荐**：一步完成能力分析，直接传一列数据 + 规格限，返回精简结论 |
+| `bql_full_analysis` | **首选**：一步出完整报告——能力 + 控制图 + 正态性检验（3 个接口并发） |
+| `bql_quick_analysis` | 轻量：只要 Cpk/Ppk 数字时用，只调能力接口 |
 | `bql_call` | 调用接口，等待并返回完整分析结果；自动生成可视化报告 + 确定性解读 |
 | `bql_list_templates` | 列出报告模板（内置 + 用户自定义）及当前模板 |
 | `bql_set_template` | 切换报告模板，例如 `bql_set_template("audit")` |
@@ -85,6 +86,79 @@ bql_quick_analysis(data="32,53,57,14,48,41", lspec=0, uspec=100)
 一次返回：能力判定、Cpk / Ppk / 均值 / 标准差、报告路径、Minitab 图链接、专家解读。
 `data` 支持 `[32,53]`、`"32,53"`、`[{"x":32}]` 三种写法。
 
+### 报告结构：三层披露
+
+报告按「3 秒决策 → 证据 → 追溯」组织。模板只决定配色与版式，信息层级由 `report.py` 统一生成，
+所以所有内置模板与用户自定义模板拿到的是同一套阅读顺序。
+
+**L1 判决层（首屏，不滚动）**
+
+| 内容 | 说明 |
+|---|---|
+| 放行判决 | `放行` / `有条件放行` / `拒收`，闸门式结论，先于能力等级出现 |
+| 判决理由 | 一句话说清为什么；不受控时明确写「Cpk 不能直接采信」 |
+| 三个数字 | Cpk（含 95% 下限）/ Ppk / 超差件数，其余数字全部下移 |
+| 判定状态条 | 受控 → 正态 → 能力 三列，未做的那步显式标「未评估」 |
+
+阈值在 `config.json` 的 `report.disposition` 里改：
+
+```json
+"disposition": { "release_cpk": 1.33, "hold_cpk": 1.00 }
+```
+
+判据优先级：有超差 → 拒收；过程不受控 → 有条件放行（能力数不可采信）；
+未做控制图 → 不判放行；之后再按 Cpk 与 release / hold 分档。
+
+**L2 证据层（默认展开，一图一句结论）**
+
+| 板块 | 内容 |
+|---|---|
+| 过程稳定性 | 控制图（Xbar-R / I-MR）+ 控制限 + Nelson 判异 + 结论带（「第 24 点越限，MR 同步异常 → 一次性特殊原因」） |
+| 过程能力 | Cp / Cpk / Pp / Ppk + 均值 + 组内/整体 σ + 归因结论（问题在中心还是在批间） |
+| 改善建议 | 三步以内、按成本排序，每步给可验证结果；0 成本的排前面，附 MSA 提示 |
+
+**L3 附录层（默认折叠，标题行带摘要）**
+
+Minitab 完整输出 / 正态性检验详情 / 完整指标与过程特性 / 完整解读与风险清单 / 原始数据与报告信息。
+折叠标题右侧直接显示关键值（如 `Cpk 1.183 · Ppk 1.144`），不展开也知道里面是什么；
+打印与导出 PDF 时由 `beforeprint` 自动全部展开，内容不会缺失。
+
+实测同一组 100 点数据：总高从 5730px（7 屏）降到 2849px（3.5 屏），
+改善建议从第 6 屏提到第 2.4 屏，首屏即可看完判决、三个数字与判定状态条。
+
+正态性检验的 AD/p 值由本地纯 Python 计算（与 scipy 的统计量完全一致，已对三种分布交叉验证），
+概率图取 Minitab 输出，两者互相印证。
+
+### 表格与导航（模板无需改造）
+
+- **超宽表格**：`group_size` 在 2–25 之间按子组展开宽表，容器 `overflow-x:auto` 横向滚动；
+  首列（子组号/序号）`position:sticky` 冻结，滚到右侧仍知道是哪一行；滚动条细样式 + `← →` 提示条。
+- **右侧锚点**：`render_report` 在 `</body>` 前统一注入 `NAV_STYLE + NAV_SCRIPT`，
+  自动扫描 `.card` / `.verdict-card` 的标题生成导航，无需修改任何模板；
+  用 `.sec .idx` 拼接序号（如 `06 · 能力解读与改善潜力`），滚动时高亮当前区块，窄屏（≤1240px）与打印自动隐藏。
+- 注入是运行期的，静态 HTML 里只有一段 `<script>`，导出 docx/pptx（读指标 JSON）不受影响。
+
+### 输出纪律（不要啰嗦）
+
+MCP 侧已经锁死"说多少"，接管不住的部分靠宿主规则补：
+
+| 层 | 手段 | 作用 |
+|---|---|---|
+| 协议层 | `FastMCP(instructions=...)` | `initialize` 时下发使用纪律，支持 MCP instructions 的宿主都会读 |
+| 工具层 | `bql_quick_analysis` 的 description | 工具描述始终在模型上下文里，最稳的一道 |
+| 返回层 | 返回体只留 `answer`（两行：结论 + 报告链接） | 没东西可复述，模型自然不会扩写 |
+| 宿主层 | WorkBuddy 用户级 `MEMORY.md` 硬规则 | 唯一能真正管住宿主 Agent「播报欲」的地方，换机器/换人不迁移 |
+
+`answer` 字段就是给用户看的最终文案，直接原文输出即可：
+
+```text
+孔径：Cpk 1.344 / Ppk 1.279 → 能力充足（n=60，超差 0 件）
+报告：file:///.../reports/capa-wb-0c0ad48eb75d.html
+```
+
+报告默认按 `config.json` 的 `report.template` 渲染（默认 `aurora` 白色），
+并在 `report.auto_open` 为真时自动打开，不需要每次指定模板。
+
 ## 性能设计（为什么快）
 
 | 优化 | 效果 |
@@ -107,23 +181,36 @@ bql_quick_analysis(data="32,53,57,14,48,41", lspec=0, uspec=100)
 ~/.workbuddy/connectors/bql/reports/<接口>-<channel>.html
 ```
 
-报告内容：
-- **Minitab 能力分析图优先**：服务端原始输出图内嵌为 base64，**在所有模板中都是首屏第一块内容**，无需外网加载
-- **能力判定**：依据 Cpk 给出 A/B/C/D 等级与结论（充分 / 充足 / 可接受 / 不足）
-- **大数字指标卡**：Cpk、Ppk、Cp、Pp，按阈值着色
-- **专家解读**：规则层确定性结论（关键发现 / 风险提示 / 行动建议）
-- **分布与规格图**：SVG 绘制的观测点 + 整体分布拟合曲线 + LSL/USL/均值/目标线
-- **分组指标表**：能力指数、过程特性（均值/标准差/样本量/不良数）
-- **原始数据 + 产出物链接**：观测值 chip、OTGraph、Minitab 报告、CSV
+报告内容（按阅读顺序）：
+1. **页头**：报告标题（取自 Minitab 输出标题）、变量、规格、子组、样本量与生成信息
+2. **结论卡**：A/B/C/D 等级 + 结论 + Cpk/Ppk/Cp/Pp 四张指标卡
+3. **专家解读**：规则层确定性结论（关键发现 / 风险提示 / 行动建议）
+4. **Minitab 完整输出**：解析 `mtbOutDoc`，把 Minitab 的**全部图片、表格和文字注释**原样搬进报告
+5. **分布与规格图**：SVG 观测点 + 整体分布拟合曲线 + USL/均值/目标线
+6. **明细**：能力指数、过程特性（PPM 口径）
+7. **原始数据与产出物**：观测值 chip、OTGraph、Minitab 报告、原始数据 / 工作表 CSV
+
+### Minitab 完整输出（重点）
+
+报告不再只放第一张图，而是解析 Minitab 的完整输出文档 `mtbOutDoc`：
+
+- **所有图**全部展示（如箱线图 3 张、六合一图 6 张），图片本就以 base64 内嵌在文档里，**无需联网**
+- **所有表格**转成语义化 `<table>`：表头 `thead` 吸顶、斑马纹、数字右对齐等宽字体、窄屏横向滚动
+- **所有文字**（警告 / 注释 / 收敛失败提示）合并为紧凑注释块
+- 解析失败时自动兜底：改用 `OTGraph` 全部图片 + `OTTable` / `OTMessage` 纯文本表
+
+解析逻辑在 `minitab_doc.py`，纯标准库（`html.parser`），不引入第三方依赖。
 
 ### 内置报告模板
 
+**全部为浅色模板**，固定 `color-scheme: light`，不跟随系统深色模式，也不提供深色皮肤。
+
 | 模板 ID | 名称 | 风格 |
 |---------|------|------|
-| `aurora`（默认） | 极光 · 浅色旗舰 | 白色背景、靛蓝主色、精致卡片与柔和阴影，Stripe / Linear 浅色设计语言 |
-| `midnight` | 午夜 · 深色专业 | 深色科技感 |
+| `aurora`（默认） | 极光 · 阅读优先 | 白色背景、靛蓝主色；结论先行、编号章节、Minitab 全量输出；打印保持浅色 |
 | `audit` | 审计白皮书 | 浅色打印版式，适合 PPAP / 客户审核 |
-| `executive` | 决策驾驶舱 | 深色高对比，Cpk 大数字 + Minitab 图并排，适合管理层汇报 |
+
+原 `midnight` / `executive` 深色模板已停用，文件移到 `templates/archive/`（不再出现在 `bql_list_templates` 中，也不可被 `bql_set_template` 选中）。
 
 切换方式（任选其一）：
 - 对话里：`bql_set_template("audit")`
@@ -133,8 +220,9 @@ bql_quick_analysis(data="32,53,57,14,48,41", lspec=0, uspec=100)
 ### 自定义模板
 
 把任意 HTML 文件放到 `~/.workbuddy/connectors/bql/templates/user/`，文件名即模板 ID（如 `mybrand.html`）。
-模板支持占位符：`{{title}}`、`{{cpk}}`、`{{verdict}}` 等标量，以及 `{{{minitab_chart}}}`、`{{{kpis}}}`、
-`{{{interpretation}}}`、`{{{distribution}}}`、`{{{base_css}}}` 等原始区块。详见
+模板支持占位符：`{{title}}`、`{{report_title}}`、`{{minitab_meta}}`、`{{spec_legend}}`、`{{cpk}}`、`{{verdict}}`
+等标量，以及 `{{{minitab_full}}}`（Minitab 图 + 表 + 文字全套）、`{{{minitab_chart}}}`（仅首图）、
+`{{{kpis}}}`、`{{{interpretation}}}`、`{{{distribution}}}`、`{{{base_css}}}` 等原始区块。详见
 `templates/user/README.md` 与 `mybrand.html.example`。用户模板与内置同名时会覆盖内置模板。
 
 返回结构里新增字段：
