@@ -1,0 +1,8 @@
+config.json
+venv/
+reports/
+__pycache__/
+*.pyc
+*.bak
+.DS_Store
+templates/archive/

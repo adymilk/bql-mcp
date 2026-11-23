@@ -52,17 +52,29 @@ def interpret(metrics: dict[str, Any]) -> dict[str, Any]:
     if lsl is not None and lsl == 0:
         risks.append("规格下限 lspec=0 疑似被服务端按“未设置下限”处理，实际可能为单侧能力分析，双侧 Cpk 可能被高估。")
 
-    if mean is not None and lsl is not None and usl is not None and usl > lsl:
+    single_sided = lsl is None or lsl == 0  # lspec=0 是 BQL “未设下限”哨兵值
+
+    if single_sided and mean is not None and usl is not None:
+        margin = usl - mean
+        if margin > 0:
+            span_pct = margin / usl * 100 if usl else 0
+            diagnosis.append(
+                f"单侧规格（仅 USL={usl:g}）：均值 {mean:.2f} 距上限仅 {margin:.2f}，"
+                f"约占上限的 {span_pct:.1f}%，规格余量偏小，是能力损失的主要来源。"
+            )
+            actions.append("优先降低过程波动，并适度下移均值以扩大上限侧余量，可最直接提升 Cpk。")
+    elif mean is not None and lsl is not None and usl is not None and usl > lsl:
         center = (lsl + usl) / 2
         offset = (mean - center) / (usl - lsl) * 100
         if abs(offset) > 10:
             diagnosis.append(f"均值 {mean:.2f} 偏离规格中心 {offset:+.1f}% ，过程未对中，是能力损失的主要来源之一。")
             actions.append("优先将过程均值调整至规格中心，可在不降低波动的前提下直接提升 Cpk。")
 
+    # BQL 返回的 >USL / <LSL 是 PPM（百万分之），不是观测点数
     if out_usl is not None and out_usl > 0:
-        risks.append(f"检测到 {_n(out_usl)} 个超出上限的观测点，存在实际不良风险。")
+        risks.append(f"预期超出上限约 {out_usl / 10000:.2f}%（{_n(out_usl)} PPM），存在实际不良风险。")
     if out_lsl is not None and out_lsl > 0:
-        risks.append(f"检测到 {_n(out_lsl)} 个超出下限的观测点，存在实际不良风险。")
+        risks.append(f"预期超出下限约 {out_lsl / 10000:.2f}%（{_n(out_lsl)} PPM），存在实际不良风险。")
 
     if cpk is not None:
         if cpk >= 1.67:

@@ -92,48 +92,87 @@ def anderson_darling(values: list[float]) -> Optional[dict[str, Any]]:
     }
 
 
+def _same_side_segments(values: list[float], center: float) -> list[tuple[int, int, int]]:
+    """返回连续位于中心线同侧的段：(起点索引, 长度, 方向)。"""
+    segments: list[tuple[int, int, int]] = []
+    start: Optional[int] = None
+    side = 0
+    for index, value in enumerate(values):
+        current = 0 if abs(value - center) < 1e-12 else (1 if value > center else -1)
+        if current == 0:
+            if start is not None and side:
+                segments.append((start, index - start, side))
+            start, side = None, 0
+        elif side == 0:
+            start, side = index, current
+        elif current != side:
+            segments.append((start, index - start, side))
+            start, side = index, current
+    if start is not None and side:
+        segments.append((start, len(values) - start, side))
+    return segments
+
+
+def _monotonic_segments(values: list[float]) -> list[tuple[int, int, int]]:
+    """返回连续单调段：(起点索引, 长度, 方向)。"""
+    segments: list[tuple[int, int, int]] = []
+    start: Optional[int] = None
+    direction = 0
+    for index in range(1, len(values)):
+        delta = values[index] - values[index - 1]
+        current = 0 if delta == 0 else (1 if delta > 0 else -1)
+        if current == 0:
+            if start is not None and direction:
+                segments.append((start, index - start, direction))
+            start, direction = None, 0
+        elif direction == 0:
+            start, direction = index - 1, current
+        elif current != direction:
+            segments.append((start, index - start, direction))
+            start, direction = index - 1, current
+    if start is not None and direction:
+        segments.append((start, len(values) - start, direction))
+    return segments
+
+
 def control_check(means: list[float], center: Optional[float],
                   ucl: Optional[float], lcl: Optional[float]) -> dict[str, Any]:
-    """按 Western Electric / Nelson 常用三条规则检查控制图。"""
+    """按 Western Electric / Nelson 常用三条规则检查控制图。
+
+    除了汇总结果，还返回命中规则的具体点号（1-based）。报告里的原始数据表要用它把
+    「连续 8 点同侧」这类判异标到具体子组上——否则控制图说不受控、数据表全标正常，
+    两边自相矛盾。
+    """
     if not means or center is None or ucl is None or lcl is None:
         return {"available": False}
 
     beyond = [i + 1 for i, m in enumerate(means) if m > ucl or m < lcl]
 
-    # 规则二：连续 8 点在中心线同一侧
-    longest_run = 0
-    run = 0
-    last_side = 0
-    for m in means:
-        side = 0 if abs(m - center) < 1e-12 else (1 if m > center else -1)
-        if side == last_side and side != 0:
-            run += 1
-        else:
-            run = 1 if side != 0 else 0
-        last_side = side
-        longest_run = max(longest_run, run)
+    side_segments = _same_side_segments(means, center)
+    longest_run = max((length for _, length, _ in side_segments), default=0)
+    rule2_points: list[int] = []
+    for start, length, _ in side_segments:
+        if length >= 8:
+            rule2_points.extend(range(start + 1, start + length + 1))
 
-    # 规则三：连续 6 点单调上升或下降
-    trend_hits = 0
-    up = down = 1
-    for i in range(1, len(means)):
-        if means[i] > means[i - 1]:
-            up, down = up + 1, 1
-        elif means[i] < means[i - 1]:
-            down, up = down + 1, 1
-        else:
-            up = down = 1
-        trend_hits = max(trend_hits, up, down)
+    mono_segments = _monotonic_segments(means)
+    longest_trend = max((length for _, length, _ in mono_segments), default=0)
+    rule3_points: list[int] = []
+    for start, length, _ in mono_segments:
+        if length >= 6:
+            rule3_points.extend(range(start + 1, start + length + 1))
 
     return {
         "available": True,
         "beyond": len(beyond),
         "beyond_points": beyond,
         "longest_run": longest_run,
-        "longest_trend": trend_hits,
+        "longest_trend": longest_trend,
         "rule2": longest_run >= 8,
-        "rule3": trend_hits >= 6,
-        "controlled": not beyond and longest_run < 8 and trend_hits < 6,
+        "rule3": longest_trend >= 6,
+        "rule2_points": sorted(set(rule2_points)),
+        "rule3_points": sorted(set(rule3_points)),
+        "controlled": not beyond and longest_run < 8 and longest_trend < 6,
         "points": len(means),
     }
 
@@ -147,6 +186,21 @@ def cpk_lower_bound(cpk: Optional[float], n: float, z: float = Z_95) -> Optional
     except (ValueError, ZeroDivisionError):
         return None
     return cpk * (1.0 - z * spread)
+
+
+def cpk_bounds(cpk: Optional[float], n: float, z: float = Z_95) -> tuple:
+    """Cpk 的双侧区间（同一 Bissell 近似），用于说明点估计的抽样不确定性。
+
+    n=100、Cpk=1.18 时区间约 1.03–1.33，宽 0.3 —— 下一批可能差这么多，
+    这是「单点 Cpk 不可辩护」的量化依据。
+    """
+    if cpk is None or not n or n < 2 or cpk <= 0:
+        return None, None
+    try:
+        spread = math.sqrt(1.0 / (9.0 * n * cpk * cpk) + 1.0 / (2.0 * (n - 1.0)))
+    except (ValueError, ZeroDivisionError):
+        return None, None
+    return cpk * (1.0 - z * spread), cpk * (1.0 + z * spread)
 
 
 def capability_breakdown(metrics: dict[str, Any]) -> dict[str, Any]:
@@ -201,8 +255,16 @@ def improvement_potential(metrics: dict[str, Any], goal: float = GRADE_CPK) -> d
 
     out: dict[str, Any] = {"goal": goal, "cpk_if_centered": cp}
 
-    if None not in (mean, lsl, usl, wstd) and wstd > 0:
-        nearest = min(usl - mean, mean - lsl)
+    # 单侧规格（仅 USL 或仅 LSL）同样要给出“需要多少 σ”——否则一条边都没有时
+    # 报告会退化成“维持现状”，与 D 级能力自相矛盾。
+    sides: list[float] = []
+    if mean is not None:
+        if usl is not None:
+            sides.append(usl - mean)
+        if lsl is not None and lsl != 0:
+            sides.append(mean - lsl)
+    if sides and wstd and wstd > 0:
+        nearest = min(sides)
         out["sigma_needed"] = nearest / (3.0 * goal) if nearest > 0 else None
         out["sigma_now"] = wstd
         if out["sigma_needed"]:

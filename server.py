@@ -27,6 +27,20 @@ import report_templates
 import interpret as interpret_module
 
 CONFIG_PATH = BASE_DIR / "config.json"
+VERSION_PATH = BASE_DIR / "VERSION"
+
+
+def _read_version() -> str:
+    """版本号以仓库根的 VERSION 文件为准，缺失时退回 0.0.0（不阻塞启动）。"""
+    try:
+        return VERSION_PATH.read_text(encoding="utf-8").strip() or "0.0.0"
+    except OSError:
+        return "0.0.0"
+
+
+__version__ = _read_version()
+REPO_URL = "https://github.com/adymilk/bql-mcp"
+
 ENDPOINTS_PATH = BASE_DIR / "endpoints.json"
 SETTINGS_HTML_PATH = BASE_DIR / "settings.html"
 UI_TOKEN = secrets.token_urlsafe(24)
@@ -87,6 +101,8 @@ INSTRUCTIONS = """\
 默认流程：bql_full_analysis 一步出完整报告（能力 + 控制图 + 正态性）→ 报告自动打开 → 对话里只留两三行结论。
 只有用户明确说"只要个 Cpk 数字"时，才用更轻的 bql_quick_analysis。
 """
+
+INSTRUCTIONS += f"\n当前连接器版本 v{__version__}（仓库 {REPO_URL}）。"
 
 
 def report_should_auto_open(config: dict[str, Any]) -> bool:
@@ -955,6 +971,21 @@ CATEGORY_KEYWORDS = {
 
 
 @mcp.tool()
+def bql_version() -> dict[str, Any]:
+    """查看连接器版本、安装位置与配置状态（确认装的是哪一版时先调它）。"""
+    cfg = load_config()
+    return {
+        "version": __version__,
+        "repo": REPO_URL,
+        "install_dir": str(BASE_DIR),
+        "endpoint_count": len(load_endpoints()),
+        "templates": [t.get("name") for t in report_templates.list_templates()],
+        "configured": bool((cfg.get("base_url") or "").strip()),
+        "default_template": ((cfg.get("report") or {}).get("template") or "aurora"),
+    }
+
+
+@mcp.tool()
 def bql_list_endpoints(category: Optional[str] = None, keyword: Optional[str] = None) -> dict[str, Any]:
     """列出已注册的分析接口（110+ 个）。可按 category 分组、按关键词筛选。
 
@@ -1085,7 +1116,16 @@ async def bql_quick_analysis(
 
     interpretation = result.get("interpretation") or {}
     headline = str(interpretation.get("headline") or "").strip()
-    answer = f"{variable}：Cpk {cpk} / Ppk {ppk} → {status['label']}（n={len(values)}，超差 {out_of_spec} 件）"
+    # 对话里的那句话必须和报告首屏同源：报告首屏已经按「未做控制图 → 不判放行」
+    # 给了有条件放行，answer 却只写"能力充足"，用户会以为可以直接放行。
+    config = load_config()
+    disp = report_module.disposition(
+        None, metrics["cpk"], out_of_spec, (config.get("report") or {}).get("disposition")
+    )
+    answer = (f"{variable}：{disp['label']}（{status['grade']} 级） · "
+              f"Cpk {cpk} / Ppk {ppk} · 超差 {out_of_spec} 件 / n={len(values)}")
+    if disp["key"] == "unverified":
+        answer += "\n本次未做控制图：补一次 I-MR / Xbar-R 才能判放行。"
     if report_url:
         answer += f"\n报告：{report_url}"
 
@@ -1094,6 +1134,8 @@ async def bql_quick_analysis(
         # answer 就是给用户看的最终一段话，无需再加工
         "answer": answer,
         "verdict": status["label"],
+        "disposition": disp["label"],
+        "disposition_key": disp["key"],
         "grade": status["grade"],
         "cpk": cpk,
         "ppk": ppk,
@@ -1472,5 +1514,16 @@ def bql_analyze_workflow(industry: str = "通用制造") -> str:
 
 
 if __name__ == "__main__":
+    if "--version" in sys.argv:
+        print(f"bql-mcp {__version__} ({REPO_URL})")
+        raise SystemExit(0)
+    if "--self-check" in sys.argv:
+        cfg = load_config()
+        configured = bool((cfg.get("base_url") or "").strip())
+        print(f"bql-mcp {__version__} @ {BASE_DIR}")
+        print(f"endpoints : {len(load_endpoints())}")
+        print(f"templates : {', '.join(t.get('name', '') for t in report_templates.list_templates())}")
+        print(f"configured: {'yes' if configured else 'no（需 base_url + token）'}")
+        raise SystemExit(0 if configured else 3)
     save_config(load_config())
     mcp.run(transport="stdio")

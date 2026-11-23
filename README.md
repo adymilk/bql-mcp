@@ -2,9 +2,15 @@
 
 一个标准 **MCP Server（stdio）**，把 BQL 的分析接口包装成通用 Agent 可直接对话调用的质量分析工具。
 
+当前版本 **v1.1.0** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 一句话安装
 
-最简（装完在 Agent 里说一句"帮我配置 BQL 连接器"）：
+把这句话（连同命令）整段丢给任意支持 MCP 的 Agent 即可：
+
+> 帮我安装 BQL MCP 连接器：执行 `curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | bash`，装完把 bql 注册进本机 MCP 配置，然后用 `bql-mcp --self-check` 把版本和配置状态报给我。
+
+只想要命令：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | bash
@@ -14,6 +20,12 @@ curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | b
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | BQL_BASE_URL=https://your-bql-host BQL_TOKEN=your-token bash
+```
+
+**装指定版本**（可复现部署 / 回滚）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | BQL_VERSION=1.1.0 bash
 ```
 
 脚本会自动：下载连接器与报告模板 → 建 venv 装依赖（检测到 `uv` 时走极速安装）→ 写入配置 → 注册到 WorkBuddy / Cursor / Claude Desktop / Codex。
@@ -33,6 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | B
 
 | 工具 | 作用 |
 |------|------|
+| `bql_version` | 查版本、安装目录、接口数、模板列表、是否已配置 |
 | `bql_configure` | 在对话里设置 BASE_URL / TOKEN / 结果通道等（无需打开网页） |
 | `bql_list_endpoints` | 列出已注册的分析接口（110 个，含控制图、正态性、MSA、DOE 等） |
 | `bql_describe_endpoint` | 查看某接口的必填/选填字段 |
@@ -109,6 +122,11 @@ bql_quick_analysis(data="32,53,57,14,48,41", lspec=0, uspec=100)
 判据优先级：有超差 → 拒收；过程不受控 → 有条件放行（能力数不可采信）；
 未做控制图 → 不判放行；之后再按 Cpk 与 release / hold 分档。
 
+**首屏阻断**：过程不受控时，首屏三个数字格改为 `判异 N 点 / Cpk（参考值）/ 超差 N 件`，
+Cpk 灰色降级并标注「不可用于判定」，等级徽标同步加「（参考）」。理由是 Cpk 的定义前提
+就是过程受控——不受控时把 Cpk 当结论展示，等于让读者记住一个不可采信的数字。
+可信边界行会给出 Cpk 的 95% 区间（Bissell 近似），量化「单点 Cpk 有多不牢」。
+
 **L2 证据层（默认展开，一图一句结论）**
 
 | 板块 | 内容 |
@@ -125,6 +143,23 @@ Minitab 完整输出 / 正态性检验详情 / 完整指标与过程特性 / 完
 
 实测同一组 100 点数据：总高从 5730px（7 屏）降到 2849px（3.5 屏），
 改善建议从第 6 屏提到第 2.4 屏，首屏即可看完判决、三个数字与判定状态条。
+过程完全受控且全部达标时，三张证据卡会再收进一个「过程证据与明细」折叠区，整页 1 屏。
+
+### 明细表：与图对齐的查阅口径
+
+工程师看明细表只有一个动机——**图上第 N 点不对，去表里核实**。所以表不是数据罗列，
+而是控制图的索引：
+
+| 设计 | 做法 |
+|---|---|
+| 观测号可定位 | 分组表给出该组点号区间（`#21–25`），与 X̄ 图横轴一一对应 |
+| 三类异常分列 | `超差`（红，超规格）/ `异常`（琥珀，控制图判异）/ `正常`；判异列写明 `X̄↑`、`R↑`、`同侧`、`趋势` |
+| 极差可视化 | R 单元格内嵌细条，宽度为 `R ÷ UCL`，一眼看出哪组离散度顶到控制限 |
+| 分组宽表 | 子组 × 观测值平铺，n>5 时自动补 s 列；超过 25 列退化为单值分栏，避免横向翻不完 |
+| 单值分栏 | 每 25 点一栏，列 `# / 测量值 / 偏差 / 判定`，偏差相对目标值或样本均值 |
+
+判异点来自 `quality.control_check` 返回的 `beyond_points / rule2_points / rule3_points`，
+与图上的判定同源，因此不会出现「图说越限、表说正常」的两套账。
 
 正态性检验的 AD/p 值由本地纯 Python 计算（与 scipy 的统计量完全一致，已对三种分布交叉验证），
 概率图取 Minitab 输出，两者互相印证。
@@ -279,3 +314,11 @@ args = ["/Users/james/.workbuddy/connectors/bql/server.py"]
 ## 端到端验证状态
 
 已用真实服务跑通：`POST /api/Capa` → 202 返回广播地址 → WebSocket 订阅 → 收到 `App\Events\BroadcastAnalysisResults` → 解析出 Cpk/Ppk/均值/标准差及 OTGraph、Minitab 文档、原始数据链接。
+
+## 版本管理与升级
+
+- 版本号唯一来源：仓库根 `VERSION`；语义化版本，改动记录在 [CHANGELOG.md](CHANGELOG.md)，对应 git tag `vX.Y.Z` 与 GitHub Release。
+- 查当前版本：`~/.workbuddy/connectors/bql/bql-mcp --version`，或在 Agent 里调 `bql_version`。
+- 升级：重跑安装脚本即可覆盖代码与内置模板；**`config.json` 与 `templates/user/` 不会被覆盖**。
+- 回滚/锁定版本：`BQL_VERSION=1.0.0` 触发同一条安装命令。
+- 发布流程：改代码 → 更新 `VERSION` 与 `CHANGELOG.md` → `git tag vX.Y.Z && git push --tags` → `gh release create`。

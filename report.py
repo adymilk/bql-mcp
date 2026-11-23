@@ -75,9 +75,21 @@ def extract_metrics(result: dict[str, Any], payload: dict[str, Any]) -> dict[str
         if number is not None:
             points.append(number)
 
+    # 实测超差件数：直接点数，而不是用 Minitab 的「合计」(PPM 口径) 当件数
+    _lsl = _num(payload.get("lspec"))
+    _usl = _num(payload.get("uspec"))
+    _lower = _lsl if (_lsl is not None and _lsl != 0) else None   # lspec=0 是“未设下限”哨兵
+    observed_out: Optional[int] = None
+    if points and (_lower is not None or _usl is not None):
+        observed_out = sum(
+            1 for p in points
+            if (_usl is not None and p > _usl) or (_lower is not None and p < _lower)
+        )
+
     return {
         "variable": variable or "",
         "points": points,
+        "observed_out": observed_out,
         "lsl": _num(payload.get("lspec")),
         "usl": _num(payload.get("uspec")),
         "target": _num(payload.get("target")),
@@ -388,6 +400,20 @@ COMPONENT_CSS = """
   box-shadow:1px 0 0 var(--line),8px 0 12px -8px rgba(16,24,40,.16)}
 .dtable thead th:first-child{background:var(--surface2);z-index:3}
 .dtable tbody tr:nth-child(even) td:first-child{background:var(--surface2)}
+/* 越限（超控制限）与超规格分开着色：前者是"数不可信"，后者是"出了不良" */
+.dtable td.ooc{background:color-mix(in srgb,var(--warn) 11%,transparent);
+  color:var(--warn);font-weight:650}
+.dtable td.pt-no{color:var(--faint);font-size:10.5px;font-variant-numeric:tabular-nums;
+  letter-spacing:.2px}
+.dtable td.marks{color:var(--warn);font-size:10.5px;font-weight:600;letter-spacing:.3px;
+  white-space:nowrap}
+.dtable td.rcell{position:relative;padding-bottom:9px}
+.dtable td.rcell i{position:absolute;left:8px;bottom:2px;height:2px;border-radius:2px;
+  background:color-mix(in srgb,var(--accent) 45%,transparent);max-width:calc(100% - 16px)}
+.vt{font-size:10.5px;color:var(--faint)}
+.vt.bad{color:var(--danger);font-weight:600}
+.vt.warn{color:var(--warn);font-weight:600}
+
 /* ---- 表格横向滚动提示 ---- */
 .dscroll-hint{display:none;margin:7px 0 0;color:var(--faint);font-size:10.5px;letter-spacing:.2px}
 .dscroll-hint.on{display:flex;align-items:center;gap:6px}
@@ -413,6 +439,11 @@ COMPONENT_CSS = """
 .hn span{color:var(--faint);font-size:10px;letter-spacing:.5px}
 .hn b{font-size:23px;font-weight:600;line-height:1.25;font-variant-numeric:tabular-nums;letter-spacing:-.4px}
 .hn em{color:var(--muted);font-size:10.5px;font-style:normal}
+.hn.hot b{color:var(--warn)}
+.hn.ref b{color:var(--faint);font-weight:500}
+.hn.ref em{color:var(--warn)}
+.hbound{margin:12px 0 0;padding-top:10px;border-top:1px dashed var(--line);
+  color:var(--faint);font-size:10.5px;line-height:1.6}
 .hnext{display:inline-flex;align-items:center;gap:6px;margin-top:16px;padding:7px 14px;
   border-radius:9px;border:1px solid var(--line);background:var(--surface2);color:var(--text);
   font-size:12px;text-decoration:none;transition:background .16s ease,border-color .16s ease}
@@ -574,6 +605,16 @@ NAV_STYLE = """<style>
   box-shadow:0 0 0 3px color-mix(in srgb,var(--accent,#4f46e5) 20%,transparent)}
 .aq-rail .aq-top{border-bottom:1px solid var(--line,#e3e8ef);border-radius:8px 8px 0 0;
   margin-bottom:4px;padding-bottom:7px}
+.aq-rail a.aq-l1{margin-left:7px}
+.aq-rail a.aq-l2{margin-left:14px}
+.aq-rail a.aq-l2 .aq-txt{font-size:10.5px}
+.aq-rail a.aq-group{color:var(--faint,#8a94a6);font-size:10px;letter-spacing:.7px;
+  text-transform:uppercase;cursor:default;pointer-events:none;padding-top:7px}
+.aq-rail a.aq-group .aq-dot{display:none}
+.aq-rail a.aq-group:hover{background:none;color:var(--faint,#8a94a6)}
+.aq-rail a .aq-dot.ring{background:none;border:1.5px solid var(--line,#ccd4e0)}
+.aq-rail a.on .aq-dot.ring{border-color:var(--accent,#4f46e5);background:none}
+.aq-rail a.aq-owner .aq-dot{background:color-mix(in srgb,var(--accent,#4f46e5) 40%,var(--line,#ccd4e0))}
 .aq-sec{scroll-margin-top:16px}
 @media(max-width:1240px){.aq-rail{display:none}}
 @media print{.aq-rail,.dscroll-hint{display:none!important}}
@@ -581,35 +622,60 @@ NAV_STYLE = """<style>
 
 NAV_SCRIPT = """<script>
 (function(){
-  var secs=[].slice.call(document.querySelectorAll('.card,.verdict-card,.hero,.strip')).filter(function(el){
-    return !el.parentElement.closest('.card,.verdict-card');
-  });
-  var items=[],links=[];
-  secs.forEach(function(el){
+  var items=[],links=[],used=[];
+
+  function isFold(el){ return el.tagName==='DETAILS' && el.classList.contains('fold'); }
+  function foldOf(el){
+    var p=el&&el.parentElement;
+    while(p){ if(isFold(p)) return p; p=p.parentElement; }
+    return null;
+  }
+  function headLabel(el){
     var h=el.querySelector('.sec h3,.section-head h3,h3,h2,.hdisp');
-    if(!h) return;
-    var txt=(h.textContent||'').trim();
-    if(!txt) return;
-    if(el.classList.contains('hero')) txt='结论';
-    var idx=el.querySelector('.sec .idx,.section-head .idx');
-    idx=idx?(idx.textContent||'').trim():'';
+    return h?(h.textContent||'').trim():'';
+  }
+  function foldLabel(d){
+    var s=d.querySelector('summary');
+    if(!s) return '';
+    var b=s.querySelector('b');
+    return ((b||s).textContent||'').trim();
+  }
+  function add(el,txt,kind,depth,folds){
+    if(!el||!txt) return;
+    for(var i=0;i<used.length;i++){ if(used[i]===el) return; }
+    used.push(el);
     if(!el.id) el.id='aq-sec-'+(items.length+1);
     el.classList.add('aq-sec');
-    items.push({id:el.id,txt:txt,idx:idx});
-  });
-
-  var appendix=document.querySelector('.appendix-head');
-  if(appendix && items.length>=1){
-    if(!appendix.id) appendix.id='aq-sec-appendix';
-    items.push({id:'aq-sec-appendix',txt:'附录',idx:''});
+    var idx=el.querySelector('.sec .idx,.section-head .idx');
+    items.push({el:el,id:el.id,txt:txt,kind:kind,depth:depth,folds:folds||[],
+      idx:idx?(idx.textContent||'').trim():''});
   }
+
+  // 正文区段、折叠块（details.fold）与附录分隔按文档顺序统一收集：
+  // 折叠区不展开时也要在导航里占位，点一下既展开又定位。
+  [].slice.call(document.querySelectorAll(
+    '.verdict-card,.hero,.strip,.card,.appendix-head,details.fold'
+  )).forEach(function(el){
+    if(el.classList.contains('appendix-head')){
+      add(el,'附录','group',0,[]);
+      return;
+    }
+    if(isFold(el)){
+      if(foldOf(el)) return;                 // 嵌套折叠不单列
+      add(el,foldLabel(el),'fold',1,[el]);
+      return;
+    }
+    if(foldOf(el)) return;                   // 折叠区内的卡片标题已隐藏，不单列
+    if(el.parentElement&&el.parentElement.closest('.card,.verdict-card')) return;
+    add(el,el.classList.contains('hero')?'结论':headLabel(el),'card',0,[]);
+  });
 
   if(items.length>=3){
     var rail=document.createElement('nav');
     rail.className='aq-rail';
     rail.setAttribute('aria-label','报告区域导航');
 
-    function mk(label,targetId){
+    function mk(label,targetId,item){
       var a=document.createElement('a');
       a.href='#'+targetId;
       a.title=label;
@@ -617,13 +683,32 @@ NAV_SCRIPT = """<script>
       var dot=document.createElement('span'); dot.className='aq-dot';
       var sp=document.createElement('span'); sp.className='aq-txt'; sp.textContent=label;
       a.appendChild(dot); a.appendChild(sp);
+      if(item){
+        if(item.depth===1) a.classList.add('aq-l1');
+        if(item.depth>=2) a.classList.add('aq-l2');
+        if(item.kind==='fold'){ a.classList.add('aq-fold'); dot.classList.add('ring'); }
+        if(item.kind==='group'){ a.classList.add('aq-group'); a.dataset.group='1'; }
+      }
       a.addEventListener('click',function(e){
         e.preventDefault();
         var t=document.getElementById(targetId);
         if(!t) return;
         if(targetId==='__top'){ window.scrollTo({top:0,behavior:'smooth'}); }
-        else { t.scrollIntoView({behavior:'smooth',block:'start'}); }
+        else {
+          if(item&&item.folds.length){          // 目标在折叠区里：先展开再定位
+            item.folds.forEach(function(d){ if(!d.open) d.open=true; });
+          }
+          var before=window.scrollY;
+          t.scrollIntoView({behavior:'smooth',block:'start'});
+          setTimeout(function(){                 // 平滑滚动不可用时兜底硬定位
+            if(Math.abs(window.scrollY-before)<4){
+              window.scrollTo(0,t.getBoundingClientRect().top+window.scrollY-16);
+            }
+          },420);
+        }
         try{ history.replaceState(null,'',targetId==='__top'?location.pathname:'#'+targetId); }catch(err){}
+        setTimeout(pick,80);
+        setTimeout(pick,520);       // 滚动稳定后再校一次高亮，避免平滑滚动丢帧漏判
       });
       rail.appendChild(a);
       return a;
@@ -631,17 +716,33 @@ NAV_SCRIPT = """<script>
 
     var topLink=mk('回到顶部','__top');
     topLink.classList.add('aq-top');
+    links.push(topLink);
     items.forEach(function(it){
-      var label=(it.idx && it.idx.length<=4) ? it.idx+' · '+it.txt : it.txt;
-      links.push(mk(label,it.id));
+      var label=(it.kind==='card'&&it.idx&&it.idx.length<=4) ? it.idx+' · '+it.txt : it.txt;
+      it.link=mk(label,it.id,it);
+      links.push(it.link);
     });
     document.body.appendChild(rail);
 
     var picked=null;
+    function ownerOf(id){
+      for(var i=0;i<items.length;i++){
+        if(items[i].id!==id||!items[i].folds.length) continue;
+        for(var j=0;j<items.length;j++){ if(items[j].el===items[i].folds[0]) return items[j].id; }
+      }
+      return null;
+    }
     function setActive(id){
       if(id===picked) return;
       picked=id;
-      links.forEach(function(a){ a.classList.toggle('on',a.dataset.target===id); });
+      links.forEach(function(a){
+        a.classList.toggle('on',a.dataset.group!=='1'&&a.dataset.target===id);
+      });
+      var own=ownerOf(id);
+      if(own===id) own=null;
+      links.forEach(function(a){
+        a.classList.toggle('aq-owner',own!==null&&a.dataset.target===own);
+      });
       var on=rail.querySelector('a.on');
       if(on && rail.scrollHeight>rail.clientHeight+4){
         var rt=rail.getBoundingClientRect(),ot=on.getBoundingClientRect();
@@ -653,12 +754,15 @@ NAV_SCRIPT = """<script>
     var ticking=false;
     function pick(){
       ticking=false;
-      var line=window.innerHeight*0.32, best=links[0]?links[0].dataset.target:null;
+      var line=window.innerHeight*0.32, best=null, first=null;
       for(var i=0;i<items.length;i++){
-        var r=document.getElementById(items[i].id).getBoundingClientRect();
-        if(r.top-line<=0) best=items[i].id;
+        var el=items[i].el;
+        if(!el.getClientRects().length) continue;   // 折叠未展开的隐藏项不参与判定
+        if(first===null) first=items[i].id;
+        if(el.getBoundingClientRect().top-line<=0) best=items[i].id;
       }
-      if(window.scrollY<40) best=links[0]?links[0].dataset.target:best;
+      if(best===null) best=first;
+      if(window.scrollY<40) best='__top';
       setActive(best);
     }
     window.addEventListener('scroll',function(){
@@ -1017,11 +1121,17 @@ _TABLE_JS = """<script>
 </script>"""
 
 
-def _raw_table(metrics: dict[str, Any]) -> str:
-    """原始数据表：按子组展开，带子组均值与极差 R（SPC 的常规查阅口径）。
+def _raw_table(metrics: dict[str, Any], limits: Optional[list] = None,
+               check: Optional[dict] = None) -> str:
+    """原始数据表：与图对齐的查阅口径，而不是数据罗列。
 
-    group_size > 1 → 宽表：子组 | X1..Xn | 均值 | 极差 | 判定
-    group_size = 1 → 纵向分栏：序号 | 值 | 偏差（每栏 25 行，避免超长页面）
+    分组 → 子组 | 观测号 | X1..Xn | 均值 | R | (s) | 越限 | 判定
+    单值 → 分栏：# | 测量值 | 偏差 | 标记
+
+    limits 来自控制图接口 [(名称, UCL, CL, LCL), ...]。把它接进来是为了让图上的
+    「第 N 点越限」能在表里被直接定位：观测号列给出该组的点号区间，越限列标出是
+    主图还是离散图越限。原来表只标超规格，图说越限、表说正常，两边对不上。
+    s 列只在子组大于 5 时出现——n≤5 时 R 的效率已经够，多一列只是增加宽度。
     """
     points = [p for p in (metrics.get("points") or []) if isinstance(p, (int, float))]
     if not points:
@@ -1042,11 +1152,37 @@ def _raw_table(metrics: dict[str, Any]) -> str:
         group_size = 1
     groups = len(points) // group_size
 
+    # 控制限：limits[0] 是主图（I / X̄），limits[1] 是离散图（MR / R）
+    def pick(index: int) -> tuple:
+        if not limits or len(limits) <= index:
+            return None, None
+        row = limits[index]
+        try:
+            return _num(row[1]), _num(row[3])
+        except (IndexError, TypeError):
+            return None, None
+
+    top_ucl, top_lcl = pick(0)
+    sec_ucl, sec_lcl = pick(1)
+    check = check or {}
+    beyond_pts = set(check.get("beyond_points") or [])
+    rule2_pts = set(check.get("rule2_points") or [])
+    rule3_pts = set(check.get("rule3_points") or [])
+    top_name = "I" if group_size <= 1 else "X̄"
+    sec_name = "MR" if group_size <= 1 else "R"
+
     def state(value: float) -> str:
         if usl is not None and value > usl:
             return "上超差"
         if lsl is not None and value < lsl:
             return "下超差"
+        return ""
+
+    def beyond(value: float, ucl: Optional[float], lcl: Optional[float]) -> str:
+        if ucl is not None and value > ucl:
+            return "up"
+        if lcl is not None and value < lcl:
+            return "down"
         return ""
 
     # 统一小数位：按数据自身精度（最多 3 位），避免 40.5 与 40.090 混排
@@ -1068,55 +1204,115 @@ def _raw_table(metrics: dict[str, Any]) -> str:
             delta = 0.0
         return f"{delta:+.{decimals}f}"
 
+    show_s = group_size > 5
     oos_total = sum(1 for p in points if state(p))
+
+    if group_size > 1:
+        group_means = [sum(points[g * group_size:(g + 1) * group_size]) / group_size
+                       for g in range(groups)]
+        group_ranges = [max(points[g * group_size:(g + 1) * group_size])
+                        - min(points[g * group_size:(g + 1) * group_size]) for g in range(groups)]
+    else:
+        group_means, group_ranges = points, []
+    beyond_groups = sum(1 for m in group_means if beyond(m, top_ucl, top_lcl))
+    beyond_sec = sum(1 for r in group_ranges if beyond(r, sec_ucl, sec_lcl))
+
     meta = [
         f"样本量 <b>{len(points)}</b>",
         f"分组 <b>{groups} × {group_size}</b>" if group_size > 1 else "单值序列",
         f"均值 <b>{_fmt(mean, 3)}</b>" if mean is not None else "",
         f"超差 <b>{oos_total}</b> 点",
+        f"判异 <b>{beyond_groups}</b> {'组' if group_size > 1 else '点'}" if top_ucl is not None else "",
     ]
     meta_html = '<div class="dmeta">' + "".join(f"<span>{m}</span>" for m in meta if m) + "</div>"
     toolbar = (
-        '<div class="dtool"><input type="search" placeholder="筛选：输入数值或「超差」" '
-        'aria-label="筛选原始数据"><span class="dcount">共 %d 行</span></div>' % len(points)
+        '<div class="dtool"><input type="search" placeholder="筛选：数值 / 超差 / 判异" '
+        'aria-label="筛选原始数据"><span class="dcount">共 %d 行</span></div>' % groups
+        if group_size > 1 else
+        '<div class="dtool"><input type="search" placeholder="筛选：数值 / 超差 / 判异" '
+        'aria-label="筛选原始数据"><span class="dcount">共 %d 点</span></div>' % len(points)
     )
 
     if group_size > 1:
         head = "".join(f"<th>X{i + 1}</th>" for i in range(group_size))
-        head = f"<thead><tr><th>子组</th>{head}<th>均值</th><th>R</th><th>判定</th></tr></thead>"
+        s_head = "<th>s</th>" if show_s else ""
+        head = (f"<thead><tr><th>子组</th><th>观测号</th>{head}"
+                f"<th>均值</th><th>R</th>{s_head}<th>判异</th><th>判定</th></tr></thead>")
         rows = []
+        s_values = []
         for g in range(groups):
             chunk = points[g * group_size:(g + 1) * group_size]
-            cells = []
-            hit = False
+            first_no = g * group_size + 1
+            last_no = first_no + group_size - 1
+            cells, hit_spec = [], False
             for value in chunk:
-                bad = state(value)
-                hit = hit or bool(bad)
+                bad = bool(state(value))
+                hit_spec = hit_spec or bad
                 cells.append(f'<td class="oos">{num_text(value)}</td>' if bad else f"<td>{num_text(value)}</td>")
-            g_mean = sum(chunk) / len(chunk)
-            rng = max(chunk) - min(chunk)
-            flag = '<span style="color:var(--danger)">超差</span>' if hit else "—"
+
+            g_mean = group_means[g]
+            rng = group_ranges[g]
+            mean_hit = beyond(g_mean, top_ucl, top_lcl)
+            r_hit = beyond(rng, sec_ucl, sec_lcl)
+
+            # 越限 = 单点超控制限；同侧 / 趋势 = 规则命中。三类都标在同一列，
+            # 这样控制图说"不受控"时，表里一定能找到对应的子组，不会两边对不上。
+            marks = []
+            if (g + 1) in beyond_pts or mean_hit:
+                marks.append(f"{top_name}{'↑' if mean_hit != 'down' else '↓'}")
+            if r_hit:
+                marks.append(f"{sec_name}↑")
+            if (g + 1) in rule2_pts:
+                marks.append("同侧")
+            if (g + 1) in rule3_pts:
+                marks.append("趋势")
+            mark_text = " ".join(marks)
+
+            mean_cls = ' class="ooc"' if mean_hit else ""
+            bar = ""
+            if sec_ucl:
+                ratio = max(0.0, min(rng / sec_ucl, 1.0))
+                bar = f'<i style="width:{ratio * 100:.0f}%"></i>'
+            r_cls = ' class="rcell ooc"' if r_hit else ' class="rcell"'
+
+            if hit_spec:
+                verdict = '<span class="vt bad">超差</span>'
+            elif marks:
+                verdict = '<span class="vt warn">异常</span>'
+            else:
+                verdict = '<span class="vt">正常</span>'
+
+            s_cell = ""
+            if show_s:
+                sigma = (sum((v - g_mean) ** 2 for v in chunk) / (len(chunk) - 1)) ** 0.5 if len(chunk) > 1 else 0.0
+                s_values.append(sigma)
+                s_cell = f"<td>{sigma:.{decimals}f}</td>"
+
             rows.append(
-                f'<tr><td>{g + 1}</td>{ "".join(cells) }'
-                f"<td>{g_mean:.{decimals}f}</td><td>{rng:.{decimals}f}</td><td>{flag}</td></tr>"
+                f'<tr><td>{g + 1}</td><td class="pt-no">#{first_no}–{last_no}</td>{"".join(cells)}'
+                f"<td{mean_cls}>{g_mean:.{decimals}f}</td>"
+                f"<td{r_cls}>{bar}{rng:.{decimals}f}</td>{s_cell}"
+                f"<td class=\"marks\">{mark_text}</td><td>{verdict}</td></tr>"
             )
+
         grand = sum(points) / len(points)
-        rbar = sum(
-            max(points[i:i + group_size]) - min(points[i:i + group_size])
-            for i in range(0, len(points), group_size)
-        ) / groups
+        rbar = sum(group_ranges) / groups
+        s_foot = f"<td>s̄ {sum(s_values) / len(s_values):.{decimals}f}</td>" if show_s else ""
         foot = (
-            f'<tfoot><tr><td>合计 / 均值</td>'
-            f'<td colspan="{group_size}">总均值 {grand:.{decimals}f}</td>'
-            f"<td>R̄ {rbar:.{decimals}f}</td><td colspan=\"2\">{groups} 组</td></tr></tfoot>"
+            f'<tfoot><tr><td>合计</td>'
+            f'<td colspan="{group_size + 1}">总均值 {grand:.{decimals}f}</td>'
+            f"<td>R̄ {rbar:.{decimals}f}</td>{s_foot}"
+            f'<td colspan="2">{groups} 组 · 越限 {beyond_groups + beyond_sec} 处</td></tr></tfoot>'
         )
         table = (
             '<div class="dtable-wrap"><table class="dtable"><caption>原始测量值 · 按子组展开</caption>'
             f"{head}<tbody>{''.join(rows)}</tbody>{foot}</table></div>"
         )
+        legend = (f"观测号与 {top_name} 图横轴一致，图上第 N 点可直接落到对应行；"
+                  f"红=超规格，琥珀=控制图判异（{top_name}/{sec_name} 超限、连续同侧、单调趋势）；"
+                  f"R 列下方细条为 R ÷ UCL。")
         return (meta_html + toolbar + table
-                + '<div class="dlegend">均值与极差 R 按子组计算；超规格单元标红。表头可点击排序。</div>'
-                + _TABLE_JS)
+                + f'<div class="dlegend">{legend}表头可点击排序。</div>' + _TABLE_JS)
 
     # 单值序列：分栏，每栏 25 行
     chunk_size = 25 if len(points) > 30 else max(len(points), 1)
@@ -1126,19 +1322,34 @@ def _raw_table(metrics: dict[str, Any]) -> str:
         body = []
         for offset, value in enumerate(chunk):
             bad = state(value)
-            cls = ' class="oos"' if bad else ""
+            index = start + offset + 1
+            hit = beyond(value, top_ucl, top_lcl) or (index in beyond_pts)
+            tags = []
+            if hit:
+                tags.append("越限")
+            if index in rule2_pts:
+                tags.append("同侧")
+            if index in rule3_pts:
+                tags.append("趋势")
+            if bad:
+                cls, mark = ' class="oos"', '<span class="vt bad">超差</span>'
+            elif tags:
+                cls, mark = ' class="ooc"', f'<span class="vt warn">{"·".join(tags)}</span>'
+            else:
+                cls, mark = "", '<span class="vt">正常</span>'
             body.append(
-                f'<tr><td>{start + offset + 1}</td><td{cls}>{num_text(value)}</td><td>{deviation(value)}</td></tr>'
+                f'<tr><td>{start + offset + 1}</td><td{cls}>{num_text(value)}</td>'
+                f"<td>{deviation(value)}</td><td>{mark}</td></tr>"
             )
         panels.append(
             '<div class="dtable-wrap"><table class="dtable">'
             f'<caption>第 {start + 1}–{start + len(chunk)} 点</caption>'
-            "<thead><tr><th>#</th><th>测量值</th><th>偏差</th></tr></thead>"
+            "<thead><tr><th>#</th><th>测量值</th><th>偏差</th><th>判定</th></tr></thead>"
             f"<tbody>{''.join(body)}</tbody></table></div>"
         )
     legend = "偏差 = 测量值 − " + ("目标值" if target is not None else "样本均值")
     return (meta_html + toolbar + f'<div class="dtable-grid">{"".join(panels)}</div>'
-            + f'<div class="dlegend">{legend}；超规格单元标红。表头可点击排序。</div>'
+            + f'<div class="dlegend">{legend}；红=超规格，琥珀=超 {top_name} 图控制限。表头可点击排序。</div>'
             + _TABLE_JS)
 
 
@@ -1530,12 +1741,24 @@ def build_extra(
         )
 
     has_flow = bool(control.get("available")) or bool(norm)
-    out_of_spec = int((_num(metrics.get("out_usl")) or 0) + (_num(metrics.get("out_lsl")) or 0))
+    ppm_out = int((_num(metrics.get("out_usl")) or 0) + (_num(metrics.get("out_lsl")) or 0))
+    observed_out = metrics.get("observed_out")
+    # 「超差 N 件」必须是实测件数；PPM 只用于“预期超差”口径
+    out_of_spec = int(observed_out) if observed_out is not None else ppm_out
     disp = disposition(
         check.get("controlled") if control.get("available") else None,
         metrics.get("cpk"), out_of_spec, disposition_cfg,
     )
+    anomaly_points = (set(check.get("beyond_points") or [])
+                      | set(check.get("rule2_points") or [])
+                      | set(check.get("rule3_points") or []))
+    n_for_ci = _num(metrics.get("n")) or len(metrics.get("points") or [])
+    cpk_bounds = quality.cpk_bounds(_num(metrics.get("cpk")), n_for_ci)
+    # 全绿：受控 + 正态 + 达到放行阈值。此时证据层收进折叠区，报告只留一屏。
+    all_green = disp.get("key") == "release" and norm.get("is_normal") is True
+
     return {
+        "all_green": all_green,
         # 旧键：保留给用户自定义模板，内容与新区块等价
         "gate_section": card("判定链", "受控 · 正态 · 能力", "能力指数的前置条件", _gate_block(gate)) if has_flow else "",
         "control_section": card("02", "过程稳定性 · 控制图", "判异规则 · 特殊原因", _control_body(control)),
@@ -1545,7 +1768,10 @@ def build_extra(
         # 新键：三层披露
         "disposition": disp,
         "verdict_hero": _verdict_hero(
-            disp, status, metrics, cap.get("cpk_lower"), out_of_spec, has_evidence=has_flow
+            disp, status, metrics, cap.get("cpk_lower"), out_of_spec,
+            has_evidence=has_flow and not all_green,
+            controlled=check.get("controlled") if control.get("available") else None,
+            bounds=cpk_bounds, anomalies=len(anomaly_points),
         ),
         "gate_strip": _gate_strip(gate),
         "control_html": _control_body(control, show_verdict=False) if control.get("available") else "",
@@ -1558,6 +1784,10 @@ def build_extra(
         ),
         "out_of_spec": out_of_spec,
         "cpk_lower": cap.get("cpk_lower"),
+        "controlled": check.get("controlled") if control.get("available") else None,
+        "is_normal": norm.get("is_normal") if norm else None,
+        "control_limits": control.get("limits") or [],
+        "control_check": check,
     }
 
 
@@ -1630,35 +1860,65 @@ def _verdict_hero(
     cpk_lower: Any = None,
     out_of_spec: Optional[int] = None,
     has_evidence: bool = True,
+    controlled: Optional[bool] = None,
+    bounds: Optional[tuple] = None,
+    anomalies: Optional[int] = None,
 ) -> str:
-    """首屏判决书：一个判决 + 三数字 + 一个去向，不做第二层解读。"""
+    """首屏判决书：一个判决 + 三数字 + 一行可信边界 + 一个去向。
+
+    过程不受控时，Cpk 会被降为"参考值"并让位给判异点数——这不是排版偏好。
+    Cpk 的前提是过程受控，把不可采信的数字用最大字号摆出来，等于让读者记住一个
+    没法用的结论；先让他看到"这个数不能用"，再看这个数是多少。
+    """
     n_value = _num(metrics.get("n"))
     n_text = _fmt(n_value, 0) if n_value is not None else str(len(metrics.get("points") or []) or "—")
     bad = out_of_spec
     if bad is None:
         bad = int((_num(metrics.get("out_usl")) or 0) + (_num(metrics.get("out_lsl")) or 0))
     lower = _num(cpk_lower)
+    cpk = _fmt(metrics.get("cpk"), 3)
 
-    cells = [
-        ("Cpk", _fmt(metrics.get("cpk"), 3), f"95% 下限 {_fmt(lower, 3)}" if lower is not None else "组内能力"),
-        ("Ppk", _fmt(metrics.get("ppk"), 3), "整体表现"),
-        ("超差", f"{bad} 件", f"n = {n_text}"),
-    ]
+    if controlled is False:
+        cells = [
+            ("判异", f"{int(anomalies or 0)} 点", "特殊原因信号", "hot"),
+            ("Cpk", cpk, "参考值 · 不可用于判定", "ref"),
+            ("超差", f"{bad} 件", f"n = {n_text}", ""),
+        ]
+    else:
+        cells = [
+            ("Cpk", cpk, f"95% 下限 {_fmt(lower, 3)}" if lower is not None else "组内能力", ""),
+            ("Ppk", _fmt(metrics.get("ppk"), 3), "整体表现", ""),
+            ("超差", f"{bad} 件", f"n = {n_text}", ""),
+        ]
+
     nums = "".join(
-        f'<div class="hn"><span>{html.escape(label)}</span>'
+        f'<div class="hn{" " + cls if cls else ""}"><span>{html.escape(label)}</span>'
         f'<b>{html.escape(value)}</b><em>{html.escape(cap)}</em></div>'
-        for label, value, cap in cells
+        for label, value, cap, cls in cells
     )
+
+    bound_html = ""
+    if bounds and bounds[0] is not None and bounds[1] is not None:
+        bound_html = (
+            f'<p class="hbound">基于 {n_text} 件样本 · Cpk 95% 区间 '
+            f"{bounds[0]:.3f}–{bounds[1]:.3f}（下一批可能落在此范围）"
+            + ("　·　过程不受控，该区间亦仅供参考" if controlled is False else "")
+            + "</p>"
+        )
+
     nxt = '<a class="hnext" href="#ev-action">看改善建议 ↓</a>' if has_evidence else ""
+    # 过程不受控时 Cpk 已降级为参考值，等级徽标必须同步降级，否则读者会拿
+    # "C 级 · 能力可接受" 当成判决依据——这正是首屏阻断要避免的误读。
+    grade_text = (f'{status.get("grade") or "—"} 级 · {status.get("label") or ""}'
+                  + ("（参考）" if controlled is False else ""))
     return (
         f'<section class="hero t-{disp.get("tone") or "neutral"}">'
         '<div class="hmain">'
         f'<div class="hdisp">{html.escape(disp.get("label") or "—")}</div>'
-        f'<div class="hgrade">{html.escape(str(status.get("grade") or "—"))} 级 · '
-        f'{html.escape(str(status.get("label") or ""))}</div>'
+        f'<div class="hgrade">{html.escape(grade_text)}</div>'
         f'<p class="hreason">{html.escape(disp.get("reason") or "")}</p>'
         '</div>'
-        f'<div class="hnums">{nums}</div>{nxt}</section>'
+        f'<div class="hnums">{nums}</div>{bound_html}{nxt}</section>'
     )
 
 
@@ -1686,7 +1946,9 @@ def _gate_strip(gate: dict[str, Any]) -> str:
         items.append(("skip", "数据正态", "未评估", "未做正态性检验"))
 
     tone = "ok" if grade in {"A+", "A", "B"} else ("warn" if grade == "C" else "bad")
-    items.append((tone, "过程能力", f"{grade} · {gate.get('cpk') or '—'}", gate.get("verdict") or ""))
+    # 过程不受控时，能力等级同样不能作为结论，这里只保留数值做对照
+    cap_note = "参考值" if controlled is False else (gate.get("verdict") or "")
+    items.append((tone, "过程能力", f"{grade} · {gate.get('cpk') or '—'}", cap_note))
 
     cells = "".join(
         f'<div class="st {tone}"><i></i><div><span>{html.escape(name)}</span>'
@@ -1780,13 +2042,38 @@ def _action_plan(control: dict[str, Any], cap: dict[str, Any], metrics: dict[str
 
     need = _num(po.get("sigma_needed"))
     now = _num(po.get("sigma_now"))
+
+    # 单侧规格：没有“公差中心”可回，最省的改善是把均值往规格余量大的一侧平移
+    usl = _num(metrics.get("usl"))
+    lsl = _num(metrics.get("lsl"))
+    mean = _num(metrics.get("mean"))
+    single_side = (usl is not None) != (lsl is not None and lsl != 0)
+    if (single_side and mean is not None and cpk is not None and cpk < 1.33
+            and not any("均值" in s[0] for s in steps)):
+        if usl is not None:
+            margin = usl - mean
+            steps.append((f"把均值从 {_fmt(mean, 2)} 下移，扩大上限侧余量",
+                          f"当前距 USL {_fmt(usl, 2)} 仅 {_fmt(margin, 2)}", "0 成本",
+                          "余量翻倍 ≈ Cpk 翻倍"))
+        else:
+            margin = mean - lsl
+            steps.append((f"把均值从 {_fmt(mean, 2)} 上移，扩大下限侧余量",
+                          f"当前距 LSL {_fmt(lsl, 2)} 仅 {_fmt(margin, 2)}", "0 成本",
+                          "余量翻倍 ≈ Cpk 翻倍"))
+
     if need is not None and now is not None and need < now * 0.995:
         steps.append((f"把 σ 从 {now:.3f} 压到 {need:.3f}",
                       f"需再降 {_fmt(po.get('sigma_cut_pct'), 0)}%", "改工艺",
                       f"Cpk → {_fmt(po.get('goal'), 2)}"))
 
     if not steps:
-        steps.append(("维持现状，按常规频次监控", "能力与稳定性均已满足要求", "—", "保持当前水平"))
+        goal = _num(po.get("goal")) or 1.33
+        if cpk is not None and cpk < goal:
+            steps.append(("先做测量系统分析（MSA / Gage R&R）",
+                          f"Cpk {_fmt(cpk, 3)} 未达 {_fmt(goal, 2)}，先排除测量误差", "低",
+                          "确认 Cpk 可信后再定改善方向"))
+        else:
+            steps.append(("维持现状，按常规频次监控", "能力与稳定性均已满足要求", "—", "保持当前水平"))
 
     rows = "".join(
         f'<li><span class="pn">{index}</span>'
@@ -1921,7 +2208,8 @@ def build_context(
         ("预期超下限", _ppm_text(metrics["out_lsl"]), "PPM"),
     ])
 
-    raw_table = _raw_table(metrics)
+    raw_table = _raw_table(metrics, (extra or {}).get("control_limits"),
+                           (extra or {}).get("control_check"))
     chart_html = build_chart(metrics)
     interpretation_html = _interpret_block(result)
     capability_kv = _capability_kv(metrics)
@@ -1947,6 +2235,18 @@ def build_context(
         f"{_seq:02d}", "改善建议", "按成本排序", None,
         extra.get("action_plan") or "", anchor="ev-action",
     )
+
+    # 自适应详略：过程受控、数据正态、Cpk 达标时，正文只留判决与数字，
+    # 三张证据卡收进折叠区——没问题就不该让读者滚动 3 屏去确认"没问题"。
+    _l2 = evidence_control + evidence_capability + action_plan_html
+    if extra.get("all_green") and _l2:
+        evidence_l2 = _fold(
+            "过程证据与明细",
+            f"受控 · 正态 · Cpk {_fmt(metrics.get('cpk'), 3)}",
+            _l2,
+        )
+    else:
+        evidence_l2 = _l2
 
     links: list[str] = []
     if graph_url:
@@ -2027,6 +2327,7 @@ def build_context(
         "disposition_tone": str((extra.get("disposition") or {}).get("tone") or "neutral"),
         "disposition_reason": str((extra.get("disposition") or {}).get("reason") or ""),
         # ---- L2 证据层 ----
+        "evidence_l2": evidence_l2,
         "evidence_control": evidence_control,
         "evidence_capability": evidence_capability,
         "action_plan": action_plan_html,

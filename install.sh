@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # BQL MCP Connector 一键安装脚本
 # 用法: curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | bash
+# 指定版本: BQL_VERSION=1.1.0 curl -fsSL .../install.sh | bash
+# 指定目录: BQL_MCP_DIR=/path curl -fsSL ... | bash -s -- <base_url> <token>
 set -euo pipefail
 
 REPO="https://github.com/adymilk/bql-mcp"
-RAW="https://raw.githubusercontent.com/adymilk/bql-mcp/main"
+REF="${BQL_REF:-${BQL_VERSION:+v${BQL_VERSION}}}"
+REF="${REF:-main}"
+RAW="https://raw.githubusercontent.com/adymilk/bql-mcp/$REF"
 DEST="${BQL_MCP_DIR:-$HOME/.workbuddy/connectors/bql}"
 PY="${PYTHON:-python3}"
 BASE_URL="${1:-${BQL_BASE_URL:-}}"
@@ -17,10 +21,10 @@ err() { printf '\033[1;31m[bql-mcp]\033[0m %s\n' "$*" >&2; }
 command -v "$PY" >/dev/null 2>&1 || { err "需要 Python 3，$PY 未找到"; exit 1; }
 "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' || { err "需要 Python 3.10+"; exit 1; }
 
-say "安装到 $DEST"
+say "安装到 $DEST（来源 $REF）"
 mkdir -p "$DEST"
 
-FILES="server.py report.py quality.py minitab_doc.py report_templates.py interpret.py exporter.py settings.html endpoints.json config.example.json requirements.txt"
+FILES="server.py report.py quality.py minitab_doc.py report_templates.py interpret.py exporter.py settings.html endpoints.json config.example.json requirements.txt VERSION CHANGELOG.md"
 for f in $FILES; do
   say "下载 $f"
   curl -fsSL "$RAW/$f" -o "$DEST/$f"
@@ -128,15 +132,27 @@ register_json "$HOME/Library/Application Support/Claude/claude_desktop_config.js
 register_json "$HOME/.claude/claude_desktop_config.json"
 register_codex
 
+# 命令行入口：装完可直接 `~/.workbuddy/connectors/bql/bql-mcp --self-check`
+LAUNCHER="$DEST/bql-mcp"
+cat > "$LAUNCHER" <<EOF
+#!/usr/bin/env bash
+exec "$PYBIN" "$SERVER" "\$@"
+EOF
+chmod +x "$LAUNCHER"
+
 say ""
-say "安装完成！"
+say "安装完成，自检结果："
+"$LAUNCHER" --self-check || warn "自检未通过（多半是还没配置 base_url + token）"
+
+say ""
+say "版本：$("$LAUNCHER" --version 2>/dev/null || echo '未知')"
 if [ -n "$BASE_URL" ] && [ -n "$TOKEN" ]; then
-  say "已预配置，直接在 Agent 对话里说一句即可："
-  say "  用 BQL 分析这组数据：32,53,57,14,48,41，规格 0~100"
+  say "已预配置，直接把这句话丢给 Agent 跑一次："
+  say "  用 BQL 跑一次过程能力分析：数据 12.5,13.1,11.8,12.9,12.2,13.4,12.0,12.7，USL 15（单侧），把报告路径和结论给我"
 else
   say "下一步（任选其一）："
   say "  1) 在 Agent 对话里说：帮我配置 BQL 连接器，base_url=... token=..."
-  say "  2) 编辑 $DEST/config.json"
+  say "  2) 编辑 $DEST/config.json（或用配置页：$LAUNCHER --self-check 之后按提示）"
 fi
 say "然后在 Agent 的连接器/设置里信任（Trust）bql。"
-say "仓库与文档：$REPO"
+say "仓库 / 版本历史：$REPO · $REPO/blob/main/CHANGELOG.md"
