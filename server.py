@@ -24,7 +24,6 @@ if str(BASE_DIR) not in sys.path:
 import report as report_module
 import report_templates
 import interpret as interpret_module
-import exporter as exporter_module
 
 CONFIG_PATH = BASE_DIR / "config.json"
 ENDPOINTS_PATH = BASE_DIR / "endpoints.json"
@@ -71,6 +70,7 @@ _settings_thread: Optional[threading.Thread] = None
 _webhook_server: Optional[ThreadingHTTPServer] = None
 _webhook_thread: Optional[threading.Thread] = None
 _LAST_REPORT: Optional[str] = None
+_LAST_BROADCAST: Optional[dict[str, Any]] = None
 
 mcp = FastMCP("bql")
 
@@ -109,9 +109,39 @@ def masked_config(config: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+_ENDPOINTS_CACHE: dict[str, Any] = {"mtime": None, "data": {}}
+
+
 def load_endpoints() -> dict[str, Any]:
-    with ENDPOINTS_PATH.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+    """接口注册表带 mtime 缓存，避免每次调用都读盘解析 JSON。"""
+    try:
+        mtime = ENDPOINTS_PATH.stat().st_mtime
+    except OSError:
+        return {}
+    if _ENDPOINTS_CACHE["mtime"] != mtime:
+        with ENDPOINTS_PATH.open("r", encoding="utf-8") as handle:
+            _ENDPOINTS_CACHE["data"] = json.load(handle)
+        _ENDPOINTS_CACHE["mtime"] = mtime
+    return _ENDPOINTS_CACHE["data"]
+
+
+_HTTP_CLIENTS: dict[int, tuple[Any, httpx.AsyncClient]] = {}
+
+
+def shared_client() -> httpx.AsyncClient:
+    """按事件循环复用 HTTP 连接池，省掉每次调用的 TLS 握手。"""
+    loop = asyncio.get_running_loop()
+    key = id(loop)
+    cached = _HTTP_CLIENTS.get(key)
+    if cached and cached[0] is loop and not cached[1].is_closed:
+        return cached[1]
+    client = httpx.AsyncClient(
+        timeout=30,
+        limits=httpx.Limits(max_keepalive_connections=8, keepalive_expiry=180),
+        follow_redirects=True,
+    )
+    _HTTP_CLIENTS[key] = (loop, client)
+    return client
 
 
 def derive_host(base_url: str) -> str:
@@ -403,6 +433,45 @@ async def collect_result(
                 task.cancel()
 
 
+async def pick_result(
+    ws_task: asyncio.Task,
+    webhook_task: Optional[asyncio.Task],
+    timeout: float,
+    channel: str,
+) -> tuple[Any, str]:
+    """等待已并行的结果任务，谁先返回用谁。"""
+    tasks: dict[asyncio.Task, str] = {ws_task: "websocket"}
+    if webhook_task is not None:
+        tasks[webhook_task] = "webhook"
+    pending = set(tasks)
+    failures: list[tuple[str, BaseException]] = []
+    deadline = time.monotonic() + timeout
+    try:
+        while pending:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"等待分析结果超时（channel={channel}）。")
+            done, pending = await asyncio.wait(
+                pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done:
+                try:
+                    result = task.result()
+                except BaseException as exc:
+                    failures.append((tasks[task], exc))
+                    continue
+                for other in pending:
+                    other.cancel()
+                return result, tasks[task]
+        if failures:
+            raise failures[0][1]
+        raise TimeoutError(f"等待分析结果超时（channel={channel}）。")
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+
+
 async def post_analysis(config: dict[str, Any], spec: dict[str, Any], body: dict[str, Any], channel: str) -> Any:
     base_url = str(config.get("base_url") or "").rstrip("/")
     path = str(spec.get("path") or "")
@@ -422,13 +491,13 @@ async def post_analysis(config: dict[str, Any], spec: dict[str, Any], body: dict
         "Authorization": "Bearer " + str(config.get("token") or ""),
     }
     timeout = float(defaults.get("timeout_seconds") or 120)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(base_url + path, params=params, json=body, headers=headers)
-        response.raise_for_status()
-        try:
-            return response.json()
-        except ValueError:
-            return {"text": response.text[:2000]}
+    client = shared_client()
+    response = await client.post(base_url + path, params=params, json=body, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    try:
+        return response.json()
+    except ValueError:
+        return {"text": response.text[:2000]}
 
 
 async def probe_http(config: dict[str, Any]) -> dict[str, Any]:
@@ -437,8 +506,7 @@ async def probe_http(config: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": "BASE_URL 未配置"}
     headers = {"Authorization": "Bearer " + str(config.get("token") or "")}
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            response = await client.get(base_url, headers=headers)
+        response = await shared_client().get(base_url, headers=headers, timeout=8)
         return {"ok": response.status_code < 500, "status": response.status_code}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
@@ -508,6 +576,7 @@ async def execute_analysis(
     payload: dict[str, Any],
     channel: Optional[str] = None,
     timeout_seconds: Optional[int] = None,
+    include_raw: bool = False,
 ) -> dict[str, Any]:
     config = load_config()
     require_runtime_config(config)
@@ -523,13 +592,38 @@ async def execute_analysis(
     timeout = float(timeout_seconds or defaults.get("timeout_seconds") or 120)
 
     mode = str(config.get("result_mode") or "websocket")
-    if mode in {"auto", "webhook"} and webhook_is_public(config):
+    webhook_public = mode in {"auto", "webhook"} and webhook_is_public(config)
+    if webhook_public:
         ensure_webhook_server()
 
-    # 先提交任务：202 响应里会带回服务端指定的广播地址/端口/channel。
-    ack = await post_analysis(config, spec, body, channel)
+    # 并行：提交任务的同时，用上一次的广播地址预先订阅 WebSocket。
+    # 首次调用没有缓存时退化为串行；缓存地址与服务端返回不一致会自动切换。
+    global _LAST_BROADCAST
+    post_task = asyncio.create_task(post_analysis(config, spec, body, channel))
+    ws_task: Optional[asyncio.Task] = None
+    if _LAST_BROADCAST:
+        ws_task = asyncio.create_task(wait_websocket(config, channel, timeout, _LAST_BROADCAST))
+    webhook_task = asyncio.create_task(wait_webhook(channel, timeout)) if webhook_public else None
+
+    previous_broadcast = _LAST_BROADCAST
+    ack = await post_task
     broadcast = parse_broadcast(ack)
-    result, source = await collect_result(config, channel, timeout, broadcast)
+    if broadcast.get("host"):
+        _LAST_BROADCAST = broadcast
+
+    if ws_task is None:
+        ws_task = asyncio.create_task(wait_websocket(config, channel, timeout, broadcast))
+    elif ws_task.done() and ws_task.exception() is not None:
+        ws_task = asyncio.create_task(wait_websocket(config, channel, timeout, broadcast))
+    elif (
+        previous_broadcast
+        and broadcast.get("host")
+        and str(broadcast.get("host")) != str(previous_broadcast.get("host"))
+    ):
+        ws_task.cancel()
+        ws_task = asyncio.create_task(wait_websocket(config, channel, timeout, broadcast))
+
+    result, source = await pick_result(ws_task, webhook_task, timeout, channel)
     normalized = normalize_result(result, ack, channel, source)
     normalized["broadcast"] = broadcast
     try:
@@ -546,6 +640,8 @@ async def execute_analysis(
         _LAST_REPORT = str(report_path)
         normalized["report_path"] = str(report_path)
         normalized["summary"] += f"\n可视化报告：{report_path}"
+        # 图片内嵌放到后台，报告先用远程地址秒开，不阻塞分析返回
+        report_module.embed_minitab_image_async(report_path, normalized)
     except Exception as exc:
         normalized["report_error"] = f"报告生成失败：{exc}"
     try:
@@ -571,6 +667,8 @@ async def execute_analysis(
             normalized["metrics_uri"] = f"bql://metrics/{json_path.name}"
     except Exception as exc:
         normalized["metrics_save_error"] = f"指标保存失败：{exc}"
+    if not include_raw:
+        normalized.pop("raw", None)
     return normalized
 
 
@@ -857,6 +955,91 @@ def bql_describe_endpoint(endpoint: str) -> dict[str, Any]:
     return {"name": endpoint, **spec}
 
 
+def _numeric_series(data: Any) -> list[float]:
+    """把一列数字、逗号分隔字符串或 [{x:1},...] 统一成 float 列表。"""
+    values: list[float] = []
+    if isinstance(data, str):
+        tokens = [t for t in re.split(r"[,;\s，、]+", data.strip()) if t]
+        for token in tokens:
+            try:
+                values.append(float(token))
+            except ValueError:
+                raise ValueError(f"无法解析数值：{token}") from None
+    elif isinstance(data, (list, tuple)):
+        for item in data:
+            if isinstance(item, dict):
+                numbers = [v for v in item.values() if isinstance(v, (int, float))]
+                if not numbers:
+                    raise ValueError("data 元素里没有数值字段")
+                values.append(float(numbers[0]))
+            else:
+                try:
+                    values.append(float(item))
+                except (TypeError, ValueError):
+                    raise ValueError(f"无法解析数值：{item}") from None
+    else:
+        raise ValueError("data 必须是数字数组或逗号分隔的字符串")
+    if not values:
+        raise ValueError("data 不能为空")
+    return values
+
+
+@mcp.tool()
+async def bql_quick_analysis(
+    data: Any,
+    lspec: float,
+    uspec: float,
+    target: Optional[float] = None,
+    group_size: int = 1,
+    analysis_type: str = "CStat",
+    variable: str = "测量值",
+    endpoint: str = "capa",
+    timeout_seconds: Optional[int] = None,
+) -> dict[str, Any]:
+    """一步完成过程能力分析：直接传一列测量值即可，无需先查接口字段。
+
+    data 支持 [32,53,57] 或 "32,53,57" 或 [{"x":32},{"x":53}]；
+    lspec/uspec 为规格下限/上限，target 可选。
+    返回精简结论（Cpk/Ppk/判定/报告路径/图表链接），适合对话里最快拿到结果。
+    """
+    started = time.perf_counter()
+    values = _numeric_series(data)
+    payload: dict[str, Any] = {
+        "data": [{variable: value} for value in values],
+        "variables": [variable],
+        "type": analysis_type,
+        "lspec": lspec,
+        "uspec": uspec,
+        "group_size": group_size,
+    }
+    if target is not None:
+        payload["target"] = target
+    result = await execute_analysis(endpoint, payload, None, timeout_seconds)
+    metrics = report_module.extract_metrics(result, payload)
+    status = report_module.capability_status(metrics["cpk"])
+    charts = result.get("charts") or [{}]
+    minitab = charts[0].get("minitab") if isinstance(charts[0], dict) else {}
+    minitab = minitab if isinstance(minitab, dict) else {}
+    out_of_spec = (report_module._num(metrics["out_usl"]) or 0) + (report_module._num(metrics["out_lsl"]) or 0)
+    return {
+        "ok": True,
+        "verdict": status["label"],
+        "grade": status["grade"],
+        "cpk": report_module._fmt(metrics["cpk"], 3),
+        "ppk": report_module._fmt(metrics["ppk"], 3),
+        "mean": report_module._fmt(metrics["mean"], 3),
+        "std_within": report_module._fmt(metrics["wstd"], 3),
+        "std_overall": report_module._fmt(metrics["ostd"], 3),
+        "n": len(values),
+        "out_of_spec": out_of_spec,
+        "report_path": result.get("report_path"),
+        "chart_url": report_module._graph_url(result),
+        "minitab_doc": minitab.get("mtbOutDoc"),
+        "interpretation": result.get("interpretation"),
+        "elapsed_ms": int((time.perf_counter() - started) * 1000),
+    }
+
+
 @mcp.tool()
 async def bql_call(
     endpoint: str,
@@ -962,6 +1145,8 @@ def bql_export(name: str, format: str = "docx") -> dict[str, Any]:
 
     导出结果保存到 reports/exports/ 目录，返回文件路径。
     """
+    import exporter as exporter_module  # 延迟导入，减少 MCP 启动时间
+
     path = exporter_module.export(name, format)
     return {
         "ok": True,
@@ -1028,14 +1213,14 @@ def bql_quality_interpret(channel: str = "", industry: str = "通用制造") -> 
 def bql_analyze_workflow(industry: str = "通用制造") -> str:
     """完整的 BQL 分析工作流：配置检查 → 接口确认 → 调用 → 解读 → 导出。"""
     return (
-        "使用 BQL MCP Connector 完成一次质量分析，严格按以下流程：\n\n"
+        "使用 BQL MCP Connector 完成一次质量分析。全程少废话，优先最快拿到结果：\n\n"
         "1. 若未配置，先用 bql_configure(base_url=..., token=...) 配置（Token 不要回显给用户）。\n"
-        "2. 用 bql_describe_endpoint 确认接口必填字段，向用户收集缺失数据；"
-        "若用户没给规格限，主动询问 lspec/uspec/目标值。\n"
-        "3. 用 bql_call 调用分析，等待 WebSocket 结果。\n"
-        "4. 读取返回里的 interpretation（确定性结论）与 report_path（可视化报告）。\n"
+        "2. 用户已给数据 + 规格限时，**直接调用 bql_quick_analysis(data=..., lspec=..., uspec=...)**，"
+        "不要先 list/describe 接口，也不要重复确认。\n"
+        "3. 只有用户要跑非能力分析接口时，才用 bql_describe_endpoint → bql_call。\n"
+        "4. 拿到结果后直接给结论：判定等级、Cpk/Ppk、主要风险、报告路径；不要复述全部原始字段。\n"
         f"5. 用行业背景「{industry}」补充解读，输出结论摘要与行动建议。\n"
-        "6. 询问用户是否需要用 bql_export 导出报告。\n"
+        "6. 用户要文件时再用 bql_export 导出。\n"
     )
 
 

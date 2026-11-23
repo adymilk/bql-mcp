@@ -2,16 +2,26 @@
 
 一个标准 **MCP Server（stdio）**，把 BQL 的分析接口包装成通用 Agent 可直接对话调用的质量分析工具。
 
-## 一键安装
+## 一句话安装
+
+最简（装完在 Agent 里说一句"帮我配置 BQL 连接器"）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | bash
 ```
 
-脚本会自动：下载连接器 → 建 venv 装依赖 → 检测并注册到 WorkBuddy / Cursor / Claude Desktop / Codex。
-安装后只需在 Agent 里说一句"帮我配置 BQL 连接器，base_url=... token=..."，或编辑 `~/.workbuddy/connectors/bql/config.json`。最后在 Agent 的连接器管理里信任（Trust）`bql` 即可。
+**零配置版**（装完即用，无需再填任何东西）：
 
-> 安全说明：Token 只存本地 `config.json`（权限 0600），不会写入 mcp 配置、不会进对话回显、不在本仓库中。
+```bash
+curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | BQL_BASE_URL=https://your-bql-host BQL_TOKEN=your-token bash
+```
+
+脚本会自动：下载连接器与报告模板 → 建 venv 装依赖（检测到 `uv` 时走极速安装）→ 写入配置 → 注册到 WorkBuddy / Cursor / Claude Desktop / Codex。
+装完后在 Agent 的连接器管理里信任（Trust）`bql`，直接说：
+
+> 用 BQL 分析这组数据：32,53,57,14,48,41，规格 0~100
+
+> 安全说明：Token 只存本地 `config.json`（权限 0600），不会写入 mcp 配置、不会进对话回显、不在本仓库中。分发给他人时请为每人签发独立 token，便于单独撤销。
 
 **设计要点**
 - 任何支持 MCP 的通用 Agent 都能用：WorkBuddy、Codex CLI、Claude Desktop、Cursor、Cline 等。
@@ -26,6 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | b
 | `bql_configure` | 在对话里设置 BASE_URL / TOKEN / 结果通道等（无需打开网页） |
 | `bql_list_endpoints` | 列出已注册的分析接口（当前：capa） |
 | `bql_describe_endpoint` | 查看某接口的必填/选填字段 |
+| `bql_quick_analysis` | **推荐**：一步完成能力分析，直接传一列数据 + 规格限，返回精简结论 |
 | `bql_call` | 调用接口，等待并返回完整分析结果；自动生成可视化报告 + 确定性解读 |
 | `bql_list_templates` | 列出报告模板（内置 + 用户自定义）及当前模板 |
 | `bql_set_template` | 切换报告模板，例如 `bql_set_template("audit")` |
@@ -62,6 +73,31 @@ curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | b
    Agent 先 `bql_describe_endpoint("capa")` 看字段，再 `bql_call(...)`，然后解读返回的 Cpk/Ppk 等指标。
 
 3. 新增接口：在 `endpoints.json` 加一条配置即可，主程序不用改。
+
+## 最快路径（推荐）
+
+分析请求只有两步，不要先查接口、不要先 describe：
+
+```text
+bql_quick_analysis(data="32,53,57,14,48,41", lspec=0, uspec=100)
+```
+
+一次返回：能力判定、Cpk / Ppk / 均值 / 标准差、报告路径、Minitab 图链接、专家解读。
+`data` 支持 `[32,53]`、`"32,53"`、`[{"x":32}]` 三种写法。
+
+## 性能设计（为什么快）
+
+| 优化 | 效果 |
+|------|------|
+| `bql_quick_analysis` 一步到位 | 省掉 1–2 次 LLM 工具往返（通常数秒） |
+| HTTP 连接池复用（keep-alive） | 省掉每次调用的 TLS 握手 |
+| POST 与 WebSocket 订阅并行 | 省掉「提交 → 连接 → 订阅」的串行等待 |
+| 广播地址跨调用缓存并预订阅 | 第二次起进一步缩短首字节时间 |
+| 报告图片内嵌改为后台任务 | 报告立即返回（约 20 KB），不再被图片下载阻塞 |
+| 接口表内存缓存 + 导出依赖延迟加载 | 降低每次调用与进程启动开销 |
+| 返回精简（默认不带 raw） | 减少传输与模型上下文开销 |
+
+剩余耗时主要来自 Minitab 服务端计算本身（通常数秒），客户端侧已压到毫秒级。
 
 ## 结果可视化
 

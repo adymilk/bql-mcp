@@ -10,6 +10,7 @@ import base64
 import html
 import math
 import re
+import threading
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -256,30 +257,67 @@ COMPONENT_CSS = """
 """
 
 
-def _embed_image(url: str) -> str:
-    """下载 Minitab 图并内嵌为 data URI，失败时回退原 URL。"""
-    if not url:
+def _graph_url(result: dict[str, Any]) -> str:
+    charts = result.get("charts") or []
+    mt = charts[0].get("minitab") if charts else {}
+    if not isinstance(mt, dict):
         return ""
+    graph = mt.get("OTGraph")
+    if isinstance(graph, list) and graph:
+        return str(graph[0])
+    return str(graph) if isinstance(graph, str) else ""
+
+
+def _fetch_data_uri(url: str, timeout: float = 6.0) -> str:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 BQL-MCP"})
-        with urllib.request.urlopen(req, timeout=8) as response:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
             content_type = response.headers.get("Content-Type") or "image/png"
             data = response.read()
         if not data or len(data) > 8 * 1024 * 1024:
-            return html.escape(url, quote=True)
+            return ""
         encoded = base64.b64encode(data).decode("ascii")
         return f"data:{content_type.split(';')[0]};base64,{encoded}"
     except Exception:
-        return html.escape(url, quote=True)
+        return ""
 
 
-def _minitab_block(graph_url: str, doc_url: str) -> str:
+def embed_minitab_image_async(path: Path, result: dict[str, Any], timeout: float = 6.0) -> None:
+    """后台把远程 Minitab 图内嵌为 base64 并重写文件，不阻塞分析返回。"""
+    url = _graph_url(result)
+    if not url:
+        return
+
+    def work() -> None:
+        data_uri = _fetch_data_uri(url, timeout)
+        if not data_uri:
+            return
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return
+        for candidate in (html.escape(url, quote=True), url):
+            marker = f'src="{candidate}"'
+            if marker in text:
+                text = text.replace(marker, f'src="{data_uri}"', 1)
+                break
+        else:
+            return
+        try:
+            path.write_text(text, encoding="utf-8")
+        except OSError:
+            pass
+
+    threading.Thread(target=work, daemon=True, name="bql-embed-image").start()
+
+
+def _minitab_block(graph_url: str, doc_url: str, embed: bool = False) -> str:
     head = (
         '<div class="hero-head"><strong>Minitab 能力分析图</strong>'
         '<span class="hero-badge">服务端原始输出 · 优先展示</span></div>'
     )
     if graph_url:
-        src = _embed_image(graph_url)
+        src = _fetch_data_uri(graph_url) if embed else html.escape(graph_url, quote=True)
         body = (
             f'<img class="hero-img" src="{src}" alt="Minitab 能力分析图" '
             'onerror="this.style.display=\'none\'">'
@@ -348,6 +386,7 @@ def build_context(
     channel: str,
     source: str,
     broadcast: dict[str, Any],
+    embed_image: bool = False,
 ) -> dict[str, Any]:
     """构建与模板无关的报告上下文。"""
     metrics = extract_metrics(result, payload)
@@ -435,7 +474,7 @@ def build_context(
         "csv_url": csv_url or "",
         "broadcast": broadcast_text,
         "base_css": COMPONENT_CSS,
-        "minitab_chart": _minitab_block(graph_url, doc_url),
+        "minitab_chart": _minitab_block(graph_url, doc_url, embed=embed_image),
         "kpis": f'<div class="kpis">{_kpi_cards(metrics)}</div>',
         "interpretation": _interpret_block(result),
         "distribution": build_chart(metrics),
@@ -455,8 +494,9 @@ def render_report(
     source: str,
     broadcast: dict[str, Any],
     template: str = "aurora",
+    embed_image: bool = False,
 ) -> Path:
-    context = build_context(endpoint, payload, result, channel, source, broadcast)
+    context = build_context(endpoint, payload, result, channel, source, broadcast, embed_image=embed_image)
     doc = report_templates.render_template(template, context)
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
