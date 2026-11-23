@@ -27,6 +27,8 @@ curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | b
 | `bql_list_endpoints` | 列出已注册的分析接口（当前：capa） |
 | `bql_describe_endpoint` | 查看某接口的必填/选填字段 |
 | `bql_call` | 调用接口，等待并返回完整分析结果；自动生成可视化报告 + 确定性解读 |
+| `bql_list_templates` | 列出报告模板（内置 + 用户自定义）及当前模板 |
+| `bql_set_template` | 切换报告模板，例如 `bql_set_template("audit")` |
 | `bql_export` | 把报告导出为 docx / pptx / html / md |
 | `bql_open_report` | 打开最近一次分析的可视化报告（可传 `path` 打开指定报告） |
 | `bql_open_settings` | 可选：打开本地可视化配置页 |
@@ -69,13 +71,35 @@ curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | b
 ~/.workbuddy/connectors/bql/reports/<接口>-<channel>.html
 ```
 
-报告内容（Linear / Vercel 风格深色设计）：
+报告内容：
+- **Minitab 能力分析图优先**：服务端原始输出图内嵌为 base64，**在所有模板中都是首屏第一块内容**，无需外网加载
 - **能力判定**：依据 Cpk 给出 A/B/C/D 等级与结论（充分 / 充足 / 可接受 / 不足）
 - **大数字指标卡**：Cpk、Ppk、Cp、Pp，按阈值着色
+- **专家解读**：规则层确定性结论（关键发现 / 风险提示 / 行动建议）
 - **分布与规格图**：SVG 绘制的观测点 + 整体分布拟合曲线 + LSL/USL/均值/目标线
-- **Minitab 能力分析图**：服务端生成的原图直接嵌入
 - **分组指标表**：能力指数、过程特性（均值/标准差/样本量/不良数）
 - **原始数据 + 产出物链接**：观测值 chip、OTGraph、Minitab 报告、CSV
+
+### 内置报告模板
+
+| 模板 ID | 名称 | 风格 |
+|---------|------|------|
+| `aurora`（默认） | 极光 · 浅色旗舰 | 白色背景、靛蓝主色、精致卡片与柔和阴影，Stripe / Linear 浅色设计语言 |
+| `midnight` | 午夜 · 深色专业 | 深色科技感 |
+| `audit` | 审计白皮书 | 浅色打印版式，适合 PPAP / 客户审核 |
+| `executive` | 决策驾驶舱 | 深色高对比，Cpk 大数字 + Minitab 图并排，适合管理层汇报 |
+
+切换方式（任选其一）：
+- 对话里：`bql_set_template("audit")`
+- 配置页「报告样式」卡片直接点选
+- 编辑 `config.json`：`"report": {"template": "audit"}`
+
+### 自定义模板
+
+把任意 HTML 文件放到 `~/.workbuddy/connectors/bql/templates/user/`，文件名即模板 ID（如 `mybrand.html`）。
+模板支持占位符：`{{title}}`、`{{cpk}}`、`{{verdict}}` 等标量，以及 `{{{minitab_chart}}}`、`{{{kpis}}}`、
+`{{{interpretation}}}`、`{{{distribution}}}`、`{{{base_css}}}` 等原始区块。详见
+`templates/user/README.md` 与 `mybrand.html.example`。用户模板与内置同名时会覆盖内置模板。
 
 返回结构里新增字段：
 - `report_path`：报告文件路径

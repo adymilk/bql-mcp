@@ -1,0 +1,91 @@
+<!--label:午夜 · 深色专业（可选）-->
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{title}} · {{endpoint}} · {{channel}}</title>
+<style>
+:root{
+  --bg:#090b10; --bg2:#0f1219; --surface:#151923; --surface2:#1c2130; --line:#282e3d;
+  --text:#eef1f8; --muted:#98a1b3; --faint:#6b7385;
+  --accent:#7c9eff; --accent-fill:rgba(124,158,255,.10); --dot:#a9c0ff;
+  --success:#3ddc97; --warn:#ffb648; --danger:#ff6b7a; --target:#c79cff; --grid:#232937;
+}
+*{box-sizing:border-box}
+body{margin:0;color:var(--text);
+  background:radial-gradient(1100px 520px at 82% -12%,rgba(124,158,255,.10),transparent 62%),
+             radial-gradient(760px 420px at 4% 8%,rgba(199,156,255,.055),transparent 60%),var(--bg);
+  font:14px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1120px;margin:0 auto;padding:36px 28px 72px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;margin-bottom:28px}
+.brand{display:flex;align-items:center;gap:14px}
+.mark{width:42px;height:42px;border-radius:13px;flex:none;display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:19px;color:#0a0d14;background:linear-gradient(140deg,#9db8ff,#7c9eff 55%,#b39bff);
+  box-shadow:0 8px 26px rgba(124,158,255,.22)}
+.brand h1{font-size:18px;font-weight:600;margin:0;letter-spacing:.2px}
+.brand p{margin:3px 0 0;color:var(--muted);font-size:12px}
+.stamp{text-align:right;color:var(--faint);font-size:11px;line-height:1.9;white-space:nowrap}
+.stamp b{color:var(--muted);font-weight:500}
+.card{background:linear-gradient(180deg,rgba(255,255,255,.018),transparent 65%),var(--surface);
+  border:1px solid var(--line);border-radius:16px;padding:24px 26px;margin-bottom:16px}
+.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:14px}
+.section-head h3{font-size:13px;font-weight:600;margin:0;letter-spacing:.3px}
+.section-head span{color:var(--faint);font-size:11px}
+.verdict{display:flex;align-items:center;gap:20px;padding-bottom:22px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.grade{width:68px;height:68px;border-radius:18px;display:flex;align-items:center;justify-content:center;flex:none;
+  font-size:34px;font-weight:700;border:1px solid currentColor;background:rgba(255,255,255,.025)}
+.verdict h2{font-size:23px;font-weight:600;margin:0 0 4px}
+.verdict p{margin:0;color:var(--muted);font-size:12px}
+.foot{color:var(--faint);font-size:11px;text-align:center;margin-top:26px;line-height:1.9}
+.foot code{color:var(--muted);font-family:ui-monospace,Menlo,monospace}
+{{{base_css}}}
+@media(max-width:760px){.wrap{padding:24px 16px 56px}.top{flex-direction:column}
+  .verdict{flex-direction:column;align-items:flex-start;gap:14px}}
+</style></head><body><div class="wrap">
+
+  <div class="top">
+    <div class="brand"><div class="mark">B</div><div>
+      <h1>BQL 过程能力分析</h1>
+      <p>{{subtitle}}</p>
+    </div></div>
+    <div class="stamp">生成于 <b>{{generated_at}}</b><br>结果来源 <b>{{source}}</b> · 频道 <b>{{channel}}</b></div>
+  </div>
+
+  {{{minitab_chart}}}
+
+  <div class="card">
+    <div class="verdict">
+      <div class="grade" style="color:{{verdict_color}}">{{grade}}</div>
+      <div><h2 style="color:{{verdict_color}}">{{verdict}}</h2>
+      <p>依据 Cpk = <b>{{cpk}}</b> 判定 · 规格 {{spec}} · 子组大小 {{group_size}}</p></div>
+    </div>
+    <div class="section-head"><h3>核心能力指数</h3><span>组内 / 整体</span></div>
+    {{{kpis}}}
+  </div>
+
+  {{{interpretation}}}
+
+  <div class="card">
+    <div class="section-head"><h3>数据分布与规格限</h3><span>{{sample_n}} 个观测点 · 曲线为整体分布拟合</span></div>
+    {{{distribution}}}
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>拟合分布 / 均值</span>
+      <span><i style="background:var(--danger)"></i>规格限 LSL / USL</span>
+      <span><i style="background:var(--target)"></i>目标值</span>
+      <span><i style="background:var(--dot)"></i>观测点</span>
+    </div>
+  </div>
+
+  <div class="two">
+    <div class="card"><div class="section-head"><h3>能力指数</h3><span>index</span></div>{{{index_rows}}}</div>
+    <div class="card"><div class="section-head"><h3>过程特性</h3><span>statistics</span></div>{{{stat_rows}}}</div>
+  </div>
+
+  <div class="card"><div class="section-head"><h3>原始数据</h3><span>{{variable}}</span></div>{{{raw_data}}}</div>
+  <div class="card"><div class="section-head"><h3>产出物链接</h3><span>Minitab</span></div>{{{links}}}</div>
+
+  <div class="foot">
+    BQL MCP Connector · 结果来源 <code>{{source}}</code> · 频道 <code>{{channel}}</code><br>
+    广播地址 <code>{{broadcast}}</code>
+  </div>
+</div></body></html>

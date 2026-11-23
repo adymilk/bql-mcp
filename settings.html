@@ -7,7 +7,7 @@
 <style>
   :root{
     --bg:#0f1115;--surface:#181b21;--surface2:#20242c;--line:#30353f;
-    --text:#f3f5f9;--muted:#9aa3b2;--accent:#5b8cff;--success:#35c08e;
+    --text:#f3f5f9;--muted:#9aa3b2;--faint:#6f7887;--accent:#5b8cff;--success:#35c08e;
     --danger:#ff6b6b;--warn:#f5a524;
   }
   *{box-sizing:border-box}
@@ -54,6 +54,18 @@
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .grid.three{grid-template-columns:repeat(3,1fr)}
   .full{grid-column:1/-1}
+  .tpl-list{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .tpl{border:1px solid var(--line);border-radius:11px;padding:13px;cursor:pointer;background:var(--surface2);transition:border-color .15s,transform .12s}
+  .tpl:hover{border-color:#4a5a7d;transform:translateY(-1px)}
+  .tpl.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(91,140,255,.16)}
+  .tpl-thumb{height:52px;border-radius:7px;margin-bottom:10px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;letter-spacing:.5px}
+  .tpl-thumb.aurora{background:linear-gradient(135deg,#ffffff,#eef1f7);color:#4f46e5}
+  .tpl-thumb.midnight{background:linear-gradient(135deg,#141923,#202a42);color:#9db8ff}
+  .tpl-thumb.audit{background:linear-gradient(135deg,#f6f8fb,#dfe5ee);color:#2456b8}
+  .tpl-thumb.executive{background:linear-gradient(135deg,#101a2e,#172b45);color:#5ce1c2}
+  .tpl-thumb.custom{background:linear-gradient(135deg,#26202f,#3a2c45);color:#d9b6ff}
+  .tpl-name{font-size:12px;font-weight:500;line-height:1.4}
+  .tpl-meta{font-size:10px;color:var(--faint);margin-top:4px}
   .lock{background:#2b2416;border:1px solid #5a4623;color:#ffd89b;border-radius:9px;padding:10px 12px;font-size:12px;margin-bottom:16px}
   .checks{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 12px}
   .chip{border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--muted);background:var(--surface2)}
@@ -180,6 +192,12 @@
       </div>
     </details>
   </form>
+
+  <section class="card" id="templateCard">
+    <div class="card-head"><span class="step">◆</span><h2>报告样式</h2><span class="badge" id="templateState">加载中</span></div>
+    <div class="tpl-list" id="templateList"></div>
+    <div class="hint" id="templateHint">所有模板均优先展示 Minitab 原始分析图。自定义模板放到配置目录下的 templates/user/，命名任意 .html 即可出现在列表中。</div>
+  </section>
 
   <section class="card" id="analysisCard">
     <div class="card-head"><span class="step">2</span><h2>试运行分析</h2><span class="badge" id="analysisState">等待配置</span></div>
@@ -417,6 +435,40 @@ async function api(path, options={}){
   try { data = await r.json(); } catch (e) { data = {error:"服务返回了非 JSON 内容"}; }
   return {ok:r.ok, data};
 }
+const DESC = {
+  aurora: "浅色旗舰 · 默认推荐",
+  midnight: "午夜深色 · 科技感",
+  audit: "浅色打印 · PPAP / 客户审核",
+  executive: "决策驾驶舱 · 管理层汇报"
+};
+async function loadTemplates(){
+  const r = await api("/api/templates");
+  if (!r.ok) return;
+  const current = r.data.current || "aurora";
+  const list = $("#templateList"); list.textContent = "";
+  (r.data.templates || []).forEach(t=>{
+    const el = document.createElement("div");
+    el.className = "tpl" + (t.name === current ? " active" : "");
+    const thumbClass = ["aurora","midnight","audit","executive"].includes(t.name) ? t.name : "custom";
+    el.innerHTML = '<div class="tpl-thumb '+thumbClass+'">'+ (t.origin === "user" ? "CUSTOM" : t.name.toUpperCase()) +'</div>'
+      + '<div class="tpl-name"></div><div class="tpl-meta"></div>';
+    el.querySelector(".tpl-name").textContent = t.label || t.name;
+    el.querySelector(".tpl-meta").textContent = (t.origin === "user" ? "自定义 · " : "内置 · ") + (DESC[t.name] || "自定义模板");
+    el.addEventListener("click", async ()=>{
+      if (t.name === current) return;
+      try {
+        const res = await api("/api/config", {method:"POST", body:JSON.stringify({"report":{"template":t.name}})});
+        if (!res.ok) throw new Error(res.data.error || "保存失败");
+        showSuccess("报告样式已切换", "下一次分析将使用「" + (t.label || t.name) + "」生成报告");
+        await loadTemplates();
+      } catch (err) { showError("模板切换失败", String(err)); }
+    });
+    list.appendChild(el);
+  });
+  $("#templateState").textContent = "当前：" + current;
+  $("#templateState").className = "badge ok";
+  $("#templateHint").textContent = "自定义模板目录：" + (r.data.user_dir || "") + "。放入任意 .html 即可选用；Minitab 图表在所有模板中均首屏优先展示。";
+}
 async function load(){
   const r = await api("/api/config");
   if (!r.ok){ showError("载入配置失败", JSON.stringify(r.data)); return; }
@@ -435,6 +487,7 @@ async function load(){
       const opt = document.createElement("option"); opt.value = name; opt.textContent = spec.name || name; select.appendChild(opt);
     });
   }
+  await loadTemplates();
 }
 document.getElementById("cfg").addEventListener("submit", async (e)=>{
   e.preventDefault();

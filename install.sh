@@ -18,10 +18,22 @@ command -v "$PY" >/dev/null 2>&1 || { err "需要 Python 3，$PY 未找到"; exi
 say "安装到 $DEST"
 mkdir -p "$DEST"
 
-FILES="server.py report.py interpret.py exporter.py settings.html endpoints.json config.example.json requirements.txt"
+FILES="server.py report.py report_templates.py interpret.py exporter.py settings.html endpoints.json config.example.json requirements.txt"
 for f in $FILES; do
   say "下载 $f"
   curl -fsSL "$RAW/$f" -o "$DEST/$f"
+done
+
+# 报告模板：内置模板每次升级覆盖；用户目录只补齐示例，不覆盖已有文件
+TEMPLATES="builtin/aurora.html builtin/midnight.html builtin/audit.html builtin/executive.html"
+for f in $TEMPLATES; do
+  mkdir -p "$DEST/templates/$(dirname "$f")"
+  say "下载模板 $f"
+  curl -fsSL "$RAW/templates/$f" -o "$DEST/templates/$f"
+done
+mkdir -p "$DEST/templates/user"
+for f in README.md mybrand.html.example; do
+  [ -f "$DEST/templates/user/$f" ] || curl -fsSL "$RAW/templates/user/$f" -o "$DEST/templates/user/$f"
 done
 
 if [ ! -f "$DEST/config.json" ]; then

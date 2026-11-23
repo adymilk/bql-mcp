@@ -1,0 +1,36 @@
+<!--label:示例 · 极简自定义模板（复制为 .html 即可启用）-->
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{title}} · {{channel}}</title>
+<style>
+:root{--surface:#fff;--surface2:#f5f7fa;--line:#dfe4ea;--text:#1b2430;--muted:#68758a;--faint:#97a2b3;
+  --accent:#2f6fed;--accent-fill:rgba(47,111,237,.08);--dot:#2f6fed;
+  --success:#0f9d65;--warn:#c98922;--danger:#d14655;--target:#8a5cd1;--grid:#e9edf3}
+*{box-sizing:border-box}
+body{margin:0;background:#f0f3f7;color:var(--text);font:14px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
+.wrap{max-width:1000px;margin:0 auto;padding:32px 22px 60px}
+.brand{font-size:18px;font-weight:700;margin-bottom:4px}
+.meta{color:var(--faint);font-size:11px;margin-bottom:20px}
+{{{base_css}}}
+</style></head><body><div class="wrap">
+  <div class="brand">我的品牌 · 过程能力报告</div>
+  <div class="meta">{{subtitle}} · {{generated_at}} · {{channel}}</div>
+
+  {{{minitab_chart}}}
+
+  <div class="card">
+    <h2 style="color:{{verdict_color}};margin:0 0 6px">{{verdict}} · {{grade}} 级</h2>
+    <p style="color:var(--muted);margin:0 0 16px">Cpk {{cpk}} / Ppk {{ppk}} · {{spec}}</p>
+    {{{kpis}}}
+  </div>
+
+  {{{interpretation}}}
+  <div class="card">{{{distribution}}}</div>
+  <div class="two">
+    <div class="card">{{{index_rows}}}</div>
+    <div class="card">{{{stat_rows}}}</div>
+  </div>
+  <div class="card">{{{raw_data}}}</div>
+  <div class="card">{{{links}}}</div>
+</div></body></html>

@@ -22,6 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 import report as report_module
+import report_templates
 import interpret as interpret_module
 import exporter as exporter_module
 
@@ -57,6 +58,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "settings_ui": {
         "host": "127.0.0.1",
         "port": 8765,
+    },
+    "report": {
+        "template": "aurora",
     },
 }
 
@@ -533,7 +537,11 @@ async def execute_analysis(
     except Exception as exc:
         normalized["interpret_error"] = f"解读生成失败：{exc}"
     try:
-        report_path = report_module.render_report(endpoint, body, normalized, channel, source, broadcast)
+        template_name = str((config.get("report") or {}).get("template") or "aurora")
+        report_path = report_module.render_report(
+            endpoint, body, normalized, channel, source, broadcast, template=template_name
+        )
+        normalized["report_template"] = template_name
         global _LAST_REPORT
         _LAST_REPORT = str(report_path)
         normalized["report_path"] = str(report_path)
@@ -609,6 +617,14 @@ class SettingsHandler(BaseHTTPRequestHandler):
             self._reply(200, {"config": masked_config(load_config())})
         elif path == "/api/endpoints":
             self._reply(200, {"endpoints": load_endpoints()})
+        elif path == "/api/templates":
+            config = load_config()
+            current = str((config.get("report") or {}).get("template") or "aurora")
+            self._reply(200, {
+                "templates": report_module.list_templates(),
+                "current": current,
+                "user_dir": str(report_templates.USER_DIR),
+            })
         elif path == "/api/report":
             report_dir = report_module.REPORTS_DIR
             files = sorted(report_dir.glob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True) if report_dir.exists() else []
@@ -762,19 +778,73 @@ def res_endpoint(name: str) -> str:
     return json.dumps({"name": name, **endpoints[name]}, ensure_ascii=False, indent=2)
 
 
+def _endpoint_category(name: str, spec: dict[str, Any]) -> str:
+    """根据接口 key/名称/路径推断分析类别，便于在大量接口中定位。"""
+    text = (name + " " + str(spec.get("name", "")) + " " + str(spec.get("path", ""))).lower()
+    rules = [
+        ("能力分析", ("capa", "能力", "sixpack", "六合一")),
+        ("量具与测量系统", ("gage", "量具", "rn", "linearity", "bias", "attribute", "一致性")),
+        ("控制图", ("chart", "控制图", "imr", "xbar", "p图", "np", "cchart", "uchart")),
+        ("假设检验", ("test", "检验", "anova", "oneway", "方差", "mann", "kruskal",
+                    "mood", "median", "paired", "运行图", "run", "游程", "onet", "twot",
+                    "onez", "twoz", "oulier", "outlier", "equalvar", "normality")),
+        ("回归与建模", ("regress", "回归", "fit", "模型", "cart", "mass", "响应", "design", "设计",
+                      "因子", "混料", "田口", "筛选", "曲面", "优化")),
+        ("分布与可靠性", ("dist", "分布", "reliab", "寿命", "可靠性", "growth", "增长", "cox", "weibull")),
+        ("图形与可视化", ("plot", "图", "histogram", "boxplot", "dotplot", "matrix", "pie", "ecdf",
+                    "probability", "等高", "等值", "cube", "气泡", "bubbl")),
+    ]
+    for label, keywords in rules:
+        if any(k in text for k in keywords):
+            return label
+    return "其他"
+
+
+CATEGORY_KEYWORDS = {
+    "能力分析": ("capa", "能力", "sixpack", "六合一"),
+    "量具与测量系统": ("gage", "量具", "量测", "msa"),
+    "控制图": ("chart", "控制图", "control"),
+    "假设检验": ("test", "检验", "anova", "方差", "oneway", "mann", "kruskal", "onet", "twot"),
+    "回归与建模": ("regress", "回归", "design", "设计", "因子", "响应", "cart", "mass", "田口", "混料"),
+    "分布与可靠性": ("dist", "分布", "reliab", "寿命", "growth", "cox"),
+    "图形与可视化": ("plot", "图", "histogram", "boxplot", "dotplot"),
+}
+
+
 @mcp.tool()
-def bql_list_endpoints() -> list[dict[str, Any]]:
-    """列出当前 BQL MCP Server 已注册的所有分析接口。"""
+def bql_list_endpoints(category: Optional[str] = None, keyword: Optional[str] = None) -> dict[str, Any]:
+    """列出已注册的分析接口（110+ 个）。可按 category 分组、按关键词筛选。
+
+    category 可选值：能力分析 / 量具与测量系统 / 控制图 / 假设检验 / 回归与建模 /
+    分布与可靠性 / 图形与可视化 / 其他。keyword 对接口名、中文名、路径做子串匹配。
+    """
     endpoints = load_endpoints()
-    return [
-        {
+    items = []
+    for name, spec in endpoints.items():
+        cat = _endpoint_category(name, spec)
+        items.append({
             "name": name,
             "display_name": spec.get("name"),
             "path": spec.get("path"),
-            "description": spec.get("description"),
-        }
-        for name, spec in endpoints.items()
-    ]
+            "category": cat,
+            "description": (spec.get("description") or "")[:120],
+        })
+    if category:
+        cat_kw = CATEGORY_KEYWORDS.get(category, ())
+        items = [i for i in items
+                 if i["category"] == category
+                 or (cat_kw and any(k in (i["name"] + str(i["display_name"]) + str(i["path"])).lower()
+                                     for k in cat_kw))]
+    if keyword:
+        kw = keyword.lower()
+        items = [i for i in items
+                 if kw in i["name"].lower()
+                 or kw in str(i["display_name"]).lower()
+                 or kw in str(i["path"]).lower()]
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for i in items:
+        groups.setdefault(i["category"], []).append(i)
+    return {"total": len(items), "groups": groups, "items": items}
 
 
 @mcp.tool()
@@ -853,6 +923,36 @@ def bql_configure(
         "ok": True,
         "message": "配置已保存。结果通道使用 websocket 即可，服务端会返回广播地址，无需配置本地 webhook。",
         "config": masked,
+    }
+
+
+@mcp.tool()
+def bql_list_templates() -> dict[str, Any]:
+    """列出所有可用的可视化报告模板（内置 + 用户自定义），并指出当前使用的模板。"""
+    config = load_config()
+    current = str((config.get("report") or {}).get("template") or "aurora")
+    return {
+        "current": current,
+        "templates": report_module.list_templates(),
+        "custom_dir": str(report_templates.USER_DIR),
+        "hint": "把自定义 HTML 放进 custom_dir 即可作为新模板使用；同名会覆盖内置模板。",
+    }
+
+
+@mcp.tool()
+def bql_set_template(name: str) -> dict[str, Any]:
+    """切换可视化报告模板，之后的分析会按新模板生成报告。name 来自 bql_list_templates。"""
+    available = {item["name"] for item in report_module.list_templates()}
+    if name not in available:
+        raise ValueError(f"未知模板：{name}；可用模板：{', '.join(sorted(available))}。请用 bql_list_templates 查看")
+    config = load_config()
+    report_cfg = config.setdefault("report", {})
+    report_cfg["template"] = name
+    save_config(config)
+    return {
+        "ok": True,
+        "template": name,
+        "message": f"报告模板已切换为 {name}。下一次分析生成的报告将采用该模板；已有报告可用 bql_export 重新导出。",
     }
 
 
