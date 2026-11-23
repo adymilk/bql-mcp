@@ -117,6 +117,24 @@ def _is_configured(cfg: dict[str, Any]) -> bool:
         return False
     return "your-bql-host" not in base
 
+
+def _out_of_spec(metrics: dict[str, Any], sample_n: int) -> tuple[int, str]:
+    """超差口径：BQL 返回的 >USL / <LSL 是 PPM（百万分之），不是件数。
+
+    能按观测点统计就用实测件数（判决也按件数走）；拿不到点位时退回 PPM/百分比，
+    绝不把 PPM 当件数报给用户。
+    """
+    ppm = (report_module._num(metrics.get("out_usl")) or 0) + (
+        report_module._num(metrics.get("out_lsl")) or 0
+    )
+    observed = metrics.get("observed_out")
+    if observed is not None:
+        pieces = int(observed)
+        return pieces, f"实测超差 {pieces}/{sample_n} 件"
+    if ppm > 0:
+        return 0, f"预期超差 {ppm / 10000:.2f}%（{ppm:.0f} PPM）"
+    return 0, "未发现超差"
+
 WEBHOOK_RESULTS: dict[str, Any] = {}
 WEBHOOK_LOCK = threading.Lock()
 _settings_server: Optional[ThreadingHTTPServer] = None
@@ -1108,7 +1126,7 @@ async def bql_quick_analysis(
     charts = result.get("charts") or [{}]
     minitab = charts[0].get("minitab") if isinstance(charts[0], dict) else {}
     minitab = minitab if isinstance(minitab, dict) else {}
-    out_of_spec = (report_module._num(metrics["out_usl"]) or 0) + (report_module._num(metrics["out_lsl"]) or 0)
+    out_of_spec, out_text = _out_of_spec(metrics, len(values))
 
     cpk = report_module._fmt(metrics["cpk"], 3)
     ppk = report_module._fmt(metrics["ppk"], 3)
@@ -1132,7 +1150,7 @@ async def bql_quick_analysis(
         None, metrics["cpk"], out_of_spec, (config.get("report") or {}).get("disposition")
     )
     answer = (f"{variable}：{disp['label']}（{status['grade']} 级） · "
-              f"Cpk {cpk} / Ppk {ppk} · 超差 {out_of_spec} 件 / n={len(values)}")
+              f"Cpk {cpk} / Ppk {ppk} · {out_text} / n={len(values)}")
     if disp["key"] == "unverified":
         answer += "\n本次未做控制图：补一次 I-MR / Xbar-R 才能判放行。"
     if report_url:
@@ -1274,7 +1292,7 @@ async def bql_full_analysis(
 
     cpk = report_module._fmt(metrics.get("cpk"), 3)
     ppk = report_module._fmt(metrics.get("ppk"), 3)
-    out_of_spec = (report_module._num(metrics["out_usl"]) or 0) + (report_module._num(metrics["out_lsl"]) or 0)
+    out_of_spec, out_text = _out_of_spec(metrics, len(values))
     norm_stats = report_module.normality_summary(norm_result, cap_payload)
     control = report_module.control_summary(chart_result, cap_payload, chart_kind) if chart_result else {"available": False}
     check = control.get("check") or {}
@@ -1306,7 +1324,7 @@ async def bql_full_analysis(
     answer = (
         f"{variable}：{disp.get('label') or status['label']}（{status['grade']} 级）"
         f" · Cpk {cpk} / Ppk {ppk} · 95% 下限 {cpk_lower}"
-        f" · 超差 {out_of_spec} 件 / n={len(values)}"
+        f" · {out_text} / n={len(values)}"
     )
     if line2:
         answer += "\n" + "｜".join(line2)
