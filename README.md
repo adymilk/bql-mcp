@@ -2,7 +2,10 @@
 
 一个标准 **MCP Server（stdio）**，把 BQL 的分析接口包装成通用 Agent 可直接对话调用的质量分析工具。
 
-当前版本 **v1.1.0** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **v1.2.0** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
+
+> 装完会自动在浏览器打开本地配置页（`http://127.0.0.1:<port>/settings?token=…`）；
+> 想再打开：`~/.workbuddy/connectors/bql/bql-mcp --settings`（`--no-open` 只打印地址不弹窗）。
 
 ## 一句话安装
 
@@ -319,6 +322,8 @@ args = ["/Users/james/.workbuddy/connectors/bql/server.py"]
 
 - 版本号唯一来源：仓库根 `VERSION`；语义化版本，改动记录在 [CHANGELOG.md](CHANGELOG.md)，对应 git tag `vX.Y.Z` 与 GitHub Release。
 - 查当前版本：`~/.workbuddy/connectors/bql/bql-mcp --version`，或在 Agent 里调 `bql_version`。
+- 打开配置页：`bql-mcp --settings`（装完会自动打开；加 `--no-open` 只打印地址）。
+- 自检：`bql-mcp --self-check`（未配置返回码 3，方便脚本判断）。
 - 升级：重跑安装脚本即可覆盖代码与内置模板；**`config.json` 与 `templates/user/` 不会被覆盖**。
 - 回滚/锁定版本：`BQL_VERSION=1.0.0` 触发同一条安装命令。
 - 发布流程：改代码 → 更新 `VERSION` 与 `CHANGELOG.md` → `git tag vX.Y.Z && git push --tags` → `gh release create`。

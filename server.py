@@ -1552,5 +1552,24 @@ if __name__ == "__main__":
         print(f"templates : {', '.join(t.get('name', '') for t in report_templates.list_templates())}")
         print(f"configured: {'yes' if configured else 'no（需 base_url + token）'}")
         raise SystemExit(0 if configured else 3)
+    if "--settings" in sys.argv:
+        # 装完直接给用户打开配置页：常驻本地 127.0.0.1，URL 带一次性 token
+        url = ensure_settings_server()
+        try:
+            (BASE_DIR / "settings.url").write_text(url, encoding="utf-8")
+        except OSError:
+            pass
+        print(url, flush=True)
+        if "--no-open" not in sys.argv and not os.environ.get("BQL_NO_BROWSER"):
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            pass
+        raise SystemExit(0)
     save_config(load_config())
     mcp.run(transport="stdio")

@@ -151,8 +151,55 @@ if [ -n "$BASE_URL" ] && [ -n "$TOKEN" ]; then
   say "  用 BQL 跑一次过程能力分析：数据 12.5,13.1,11.8,12.9,12.2,13.4,12.0,12.7，USL 15（单侧），把报告路径和结论给我"
 else
   say "下一步（任选其一）："
-  say "  1) 在 Agent 对话里说：帮我配置 BQL 连接器，base_url=... token=..."
-  say "  2) 编辑 $DEST/config.json（或用配置页：$LAUNCHER --self-check 之后按提示）"
+  say "  1) 在下面的配置页里填 base_url 与 token（推荐）"
+  say "  2) 在 Agent 对话里说：帮我配置 BQL 连接器，base_url=... token=..."
+  say "  3) 直接编辑 $DEST/config.json"
 fi
 say "然后在 Agent 的连接器/设置里信任（Trust）bql。"
 say "仓库 / 版本历史：$REPO · $REPO/blob/main/CHANGELOG.md"
+
+# 装完自动打开本地配置页：常驻 127.0.0.1，URL 带一次性 token
+open_settings_ui() {
+  local url="" file="$DEST/settings.url"
+  if [ -f "$file" ]; then
+    local cached
+    cached="$(cat "$file" 2>/dev/null || true)"
+    if [ -n "$cached" ] && curl -fsS -o /dev/null -m 2 "$cached" 2>/dev/null; then
+      url="$cached"
+      say "复用已在运行的配置页"
+    fi
+  fi
+  if [ -z "$url" ]; then
+    rm -f "$file"
+    nohup "$LAUNCHER" --settings --no-open </dev/null >"$DEST/settings.log" 2>&1 &
+    local i=0
+    while [ "$i" -lt 20 ]; do
+      if [ -s "$file" ]; then
+        url="$(cat "$file" 2>/dev/null || true)"
+        [ -n "$url" ] && break
+      fi
+      i=$((i + 1))
+      sleep 0.3
+    done
+  fi
+
+  if [ -z "$url" ]; then
+    warn "配置页没起来（看 $DEST/settings.log），可手动运行：$LAUNCHER --settings"
+    return 0
+  fi
+  say ""
+  say "配置页：$url"
+  if [ "${BQL_NO_OPEN:-0}" = "1" ]; then
+    say "（BQL_NO_OPEN=1，已跳过自动打开浏览器）"
+    return 0
+  fi
+  case "$(uname -s)" in
+    Darwin) open "$url" >/dev/null 2>&1 || true ;;
+    Linux) xdg-open "$url" >/dev/null 2>&1 || true ;;
+    MINGW*|MSYS*|CYGWIN*) start "" "$url" >/dev/null 2>&1 || true ;;
+  esac
+  say "已在浏览器打开配置页；改完点「保存」即可，无需重启 Agent 也能生效。"
+  say "（页面打不开就重跑：$LAUNCHER --settings）"
+}
+
+open_settings_ui
