@@ -108,6 +108,15 @@ INSTRUCTIONS += f"\n当前连接器版本 v{__version__}（仓库 {REPO_URL}）�
 def report_should_auto_open(config: dict[str, Any]) -> bool:
     return bool((config.get("report") or {}).get("auto_open", True))
 
+
+def _is_configured(cfg: dict[str, Any]) -> bool:
+    """占位地址（config.example.json 里的 your-bql-host）不算已配置。"""
+    base = str(cfg.get("base_url") or "").strip()
+    token = str(cfg.get("token") or "").strip()
+    if not base or not token:
+        return False
+    return "your-bql-host" not in base
+
 WEBHOOK_RESULTS: dict[str, Any] = {}
 WEBHOOK_LOCK = threading.Lock()
 _settings_server: Optional[ThreadingHTTPServer] = None
@@ -980,7 +989,7 @@ def bql_version() -> dict[str, Any]:
         "install_dir": str(BASE_DIR),
         "endpoint_count": len(load_endpoints()),
         "templates": [t.get("name") for t in report_templates.list_templates()],
-        "configured": bool((cfg.get("base_url") or "").strip()),
+        "configured": _is_configured(cfg),
         "default_template": ((cfg.get("report") or {}).get("template") or "aurora"),
     }
 
@@ -1519,7 +1528,7 @@ if __name__ == "__main__":
         raise SystemExit(0)
     if "--self-check" in sys.argv:
         cfg = load_config()
-        configured = bool((cfg.get("base_url") or "").strip())
+        configured = _is_configured(cfg)
         print(f"bql-mcp {__version__} @ {BASE_DIR}")
         print(f"endpoints : {len(load_endpoints())}")
         print(f"templates : {', '.join(t.get('name', '') for t in report_templates.list_templates())}")

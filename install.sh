@@ -21,7 +21,7 @@ err() { printf '\033[1;31m[bql-mcp]\033[0m %s\n' "$*" >&2; }
 command -v "$PY" >/dev/null 2>&1 || { err "需要 Python 3，$PY 未找到"; exit 1; }
 "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' || { err "需要 Python 3.10+"; exit 1; }
 
-say "安装到 $DEST（来源 $REF）"
+say "安装到 ${DEST}（来源 ${REF}）"
 mkdir -p "$DEST"
 
 FILES="server.py report.py quality.py minitab_doc.py report_templates.py interpret.py exporter.py settings.html endpoints.json config.example.json requirements.txt VERSION CHANGELOG.md"
