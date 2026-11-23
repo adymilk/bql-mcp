@@ -1,0 +1,34 @@
+{
+  "capa": {
+    "name": "正态能力分析",
+    "path": "/api/Capa",
+    "method": "POST",
+    "description": "使用正态分布评估过程的潜在（组内）能力和整体能力，返回 Cp/Pp/Cpk/Ppk 等指标。",
+    "required": [
+      "data",
+      "variables",
+      "lspec",
+      "uspec",
+      "group_size",
+      "type"
+    ],
+    "optional": [
+      "target"
+    ],
+    "enums": {
+      "type": [
+        "CStat",
+        "ZBench"
+      ]
+    },
+    "query_defaults": {
+      "img_width": 1521,
+      "img_height": 900
+    },
+    "notes": [
+      "data 是原始观测数组，variables 是需要分析的字段名数组。",
+      "lspec 为规格下限，uspec 为规格上限。",
+      "HTTP POST 返回任务确认信息；分析结果可通过 webhook 回调或 WebSocket 事件 BroadcastAnalysisResults 获取。"
+    ]
+  }
+}

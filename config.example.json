@@ -1,0 +1,29 @@
+{
+  "base_url": "https://your-bql-host",
+  "token": "",
+  "result_mode": "websocket",
+  "websocket": {
+    "host": "",
+    "port": 6001,
+    "key": "b3CnDSGvJUDhqqEJekBddzUh",
+    "cluster": "ap3",
+    "tls": false
+  },
+  "webhook": {
+    "host": "127.0.0.1",
+    "port": 8766,
+    "public_base_url": ""
+  },
+  "defaults": {
+    "channel_prefix": "wb-",
+    "timeout_seconds": 120,
+    "subscribe_delay_seconds": 0.4,
+    "img_width": 1521,
+    "img_height": 900,
+    "webhook": ""
+  },
+  "settings_ui": {
+    "host": "127.0.0.1",
+    "port": 8765
+  }
+}

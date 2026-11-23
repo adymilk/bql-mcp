@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BQL 连接器设置</title>
+<style>
+  :root{
+    --bg:#0f1115;--surface:#181b21;--surface2:#20242c;--line:#30353f;
+    --text:#f3f5f9;--muted:#9aa3b2;--accent:#5b8cff;--success:#35c08e;
+    --danger:#ff6b6b;--warn:#f5a524;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:13px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  .app{max-width:800px;margin:0 auto;padding:32px 20px 72px}
+  .header{display:flex;gap:14px;align-items:center;margin-bottom:26px}
+  .logo{width:40px;height:40px;border-radius:12px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex:none}
+  h1{font-size:20px;font-weight:500;margin:0;letter-spacing:.2px}
+  .header p{margin:2px 0 0;color:var(--muted);font-size:12px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:14px}
+  .card-head{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+  .step{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+  h2{font-size:14px;font-weight:500;margin:0}
+  .badge{font-size:11px;line-height:18px;padding:0 7px;border-radius:5px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .badge.req{color:var(--danger);border-color:#5d3030;background:#2a1a1c}
+  .badge.ok{color:var(--success);border-color:#245144;background:#152b25}
+  .badge.warn{color:var(--warn);border-color:#5a4623;background:#2b2416}
+  .field{margin-bottom:16px}
+  label{display:block;color:var(--muted);font-size:12px;margin-bottom:6px}
+  .label-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  input,select,textarea{width:100%;background:#111318;border:1px solid var(--line);border-radius:9px;color:var(--text);padding:10px 12px;font:13px/1.5 inherit;outline:none;transition:border-color .15s,box-shadow .15s}
+  textarea{min-height:150px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,140,255,.13)}
+  .field.invalid input,.field.invalid textarea{border-color:var(--danger);box-shadow:0 0 0 3px rgba(255,107,107,.12)}
+  .hint{color:var(--muted);font-size:11px;margin-top:5px}
+  .error{color:var(--danger);font-size:11px;margin-top:5px;min-height:14px}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+  button{position:relative;background:var(--surface2);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:10px 16px;font:13px inherit;cursor:pointer;transition:transform .12s,background .15s,border-color .15s}
+  button:hover{background:#272c35;border-color:#414855}
+  button:active{transform:translateY(1px)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{background:#6d99ff}
+  button.ghost{background:transparent}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.busy{color:transparent;pointer-events:none}
+  button.busy:after{content:"";position:absolute;left:50%;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+  details{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:0 22px;margin-bottom:12px}
+  details[open]{padding-bottom:22px}
+  summary{cursor:pointer;padding:16px 0;font-size:14px;font-weight:500;list-style:none;display:flex;align-items:center;gap:8px}
+  summary::-webkit-details-marker{display:none}
+  summary:before{content:"";width:7px;height:7px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(45deg);margin-right:4px;transition:transform .18s}
+  details[open] summary:before{transform:rotate(-135deg)}
+  summary:hover{color:var(--accent)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .grid.three{grid-template-columns:repeat(3,1fr)}
+  .full{grid-column:1/-1}
+  .lock{background:#2b2416;border:1px solid #5a4623;color:#ffd89b;border-radius:9px;padding:10px 12px;font-size:12px;margin-bottom:16px}
+  .checks{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 12px}
+  .chip{border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--muted);background:var(--surface2)}
+  .chip:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--muted);margin-right:7px;vertical-align:1px}
+  .chip.ok{color:var(--success);border-color:#245144}
+  .chip.ok:before{background:var(--success)}
+  .chip.err{color:var(--danger);border-color:#5d3030}
+  .chip.err:before{background:var(--danger)}
+  pre{white-space:pre-wrap;word-break:break-word;background:#111318;border:1px solid var(--line);border-radius:9px;padding:12px;font:11px/1.6 ui-monospace,monospace;color:#cbd2dc;max-height:220px;overflow:auto;margin:0}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+  td{border-bottom:1px solid var(--line);padding:7px 8px}
+  td:first-child{color:var(--muted);width:45%}
+  td:last-child{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+  .links{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 14px}
+  .links a{color:var(--accent);text-decoration:none;border:1px solid #2c3c5c;background:#151c2b;border-radius:8px;padding:6px 10px;font-size:12px}
+  .links a:hover{text-decoration:underline}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);opacity:0;pointer-events:none;background:#2a181b;border:1px solid #6b3337;color:#ffd9da;border-radius:12px;padding:14px 16px;max-width:520px;width:calc(100% - 40px);box-shadow:0 12px 40px rgba(0,0,0,.4);transition:opacity .2s,transform .2s;z-index:40}
+  .toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+  .toast.shake{animation:shake .42s ease}
+  .toast-head{display:flex;align-items:center;justify-content:space-between;gap:12px;font-weight:500;font-size:13px}
+  .toast-close{border:0;background:transparent;color:#ffb3b6;padding:0 4px;font-size:18px;line-height:1}
+  .toast-msg{margin-top:6px;color:#ffc9cb;font-size:12px;word-break:break-word}
+  .overlay{position:fixed;inset:0;background:rgba(8,10,14,.72);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
+  .overlay.show{opacity:1}
+  .success-card{background:var(--surface);border:1px solid #245144;border-radius:18px;padding:34px 42px;text-align:center;transform:scale(.92);transition:transform .28s cubic-bezier(.2,1.4,.4,1)}
+  .overlay.show .success-card{transform:scale(1)}
+  .success-card svg{width:72px;height:72px;display:block;margin:0 auto 14px}
+  .success-card .ring{fill:none;stroke:#35c08e;stroke-width:3;stroke-dasharray:176;stroke-dashoffset:176}
+  .success-card .tick{fill:none;stroke:#35c08e;stroke-width:4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:48;stroke-dashoffset:48}
+  .overlay.show .ring{animation:draw .5s ease forwards}
+  .overlay.show .tick{animation:draw .35s .38s ease forwards}
+  .success-title{font-size:16px;font-weight:500}
+  .success-sub{color:var(--muted);font-size:12px;margin-top:4px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes draw{to{stroke-dashoffset:0}}
+  @keyframes shake{0%,100%{margin-left:0}20%{margin-left:-8px}40%{margin-left:7px}60%{margin-left:-4px}80%{margin-left:3px}}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  @media (max-width:560px){.grid,.grid.three{grid-template-columns:1fr}.app{padding:24px 14px 60px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <div class="logo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 7h6M14 7h6M4 17h4M12 17h8M10 4v6M8 13v8"/>
+        <circle cx="10" cy="7" r="2"/><circle cx="8" cy="17" r="2"/><circle cx="16" cy="17" r="2"/>
+      </svg>
+    </div>
+    <div>
+      <h1>BQL 连接器设置</h1>
+      <p>配置连接，提供数据，直接拿到分析结果。</p>
+    </div>
+  </header>
+
+  <form id="cfg" novalidate>
+    <section class="card">
+      <div class="card-head"><span class="step">1</span><h2>连接信息</h2><span class="badge req">必填</span></div>
+      <div class="field">
+        <label for="base_url">BASE_URL</label>
+        <input id="base_url" name="base_url" placeholder="https://your-bql-host" autocomplete="off" spellcheck="false">
+        <div class="hint">BQL 服务的根地址，例如 https://bql.example.com</div>
+        <div class="error" data-error="base_url"></div>
+      </div>
+      <div class="field">
+        <div class="label-row"><label for="token">TOKEN（Bearer）</label><span class="badge warn" id="tokenState">未配置</span></div>
+        <input id="token" name="token" type="password" placeholder="留空表示不修改已保存的 Token" autocomplete="new-password">
+        <div class="hint" id="tokenHint">Token 只保存在本机权限为 0600 的配置文件中。</div>
+        <div class="error" data-error="token"></div>
+      </div>
+      <div class="actions">
+        <button class="primary" type="submit" id="save">保存配置</button>
+        <button type="button" id="test">测试连接</button>
+        <button class="ghost" type="button" id="reload">重新载入</button>
+      </div>
+    </section>
+
+    <details>
+      <summary>结果接收方式<span class="badge">默认 websocket</span></summary>
+      <div class="grid">
+        <div class="field">
+          <label for="result_mode">结果获取方式</label>
+          <select id="result_mode" name="result_mode">
+            <option value="websocket">websocket（推荐，出站连接，无需公网 IP）</option>
+            <option value="auto">auto（websocket + 公网 webhook，谁先返回用谁）</option>
+            <option value="webhook">webhook（需公网回调地址）</option>
+          </select>
+          <div class="hint">推荐 websocket：MCP 主动连服务端广播地址，POST 响应会自动带回该地址。BQL 是外网服务，回调不到本地 127.0.0.1，本地 webhook 会被自动忽略。</div>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>Webhook 接收器<span class="badge">可选</span></summary>
+      <div class="grid">
+        <div class="field"><label>监听地址</label><input name="webhook.host" placeholder="127.0.0.1"></div>
+        <div class="field"><label>监听端口</label><input name="webhook.port" type="number" placeholder="8766"></div>
+        <div class="field full"><label>对外回调基础地址</label><input name="webhook.public_base_url" placeholder="https://your-public-callback-host"></div>
+        <div class="field full"><div class="hint">BQL 是外网服务，回调不到本地 127.0.0.1。只有填了公网可达地址（或公网隧道）webhook 才会启用；否则走 websocket。最终回调 URL 为 基础地址 + /webhook/&lt;channel&gt;。</div></div>
+      </div>
+    </details>
+
+    <details>
+      <summary>WebSocket（Pusher 兼容）<span class="badge">可选</span></summary>
+      <div class="grid">
+        <div class="field"><label>wsHost（留空自动从 BASE_URL 推导）</label><input name="websocket.host" placeholder="127.0.0.1"></div>
+        <div class="field"><label>wsPort</label><input name="websocket.port" type="number" placeholder="6001"></div>
+        <div class="field"><label>App key</label><input name="websocket.key" placeholder="b3CnDSGvJUDhqqEJekBddzUh"></div>
+        <div class="field"><label>Cluster</label><input name="websocket.cluster" placeholder="ap3"></div>
+        <div class="field"><label>forceTLS</label><select name="websocket.tls"><option value="false">false</option><option value="true">true</option></select></div>
+      </div>
+    </details>
+
+    <details>
+      <summary>默认参数<span class="badge">可选</span></summary>
+      <div class="grid">
+        <div class="field"><label>channel 前缀</label><input name="defaults.channel_prefix" placeholder="wb-"></div>
+        <div class="field"><label>超时秒数</label><input name="defaults.timeout_seconds" type="number" placeholder="120"></div>
+        <div class="field"><label>订阅等待秒数</label><input name="defaults.subscribe_delay_seconds" type="number" step="0.1" placeholder="0.4"></div>
+        <div class="field"><label>贴图宽度 px</label><input name="defaults.img_width" type="number" placeholder="1521"></div>
+        <div class="field"><label>贴图高度 px</label><input name="defaults.img_height" type="number" placeholder="900"></div>
+        <div class="field"><label>webhook 覆盖</label><input name="defaults.webhook" placeholder="留空则自动生成"></div>
+        <div class="field"><label>设置页端口（重启后生效）</label><input name="settings_ui.port" type="number" placeholder="8765"></div>
+      </div>
+    </details>
+  </form>
+
+  <section class="card" id="analysisCard">
+    <div class="card-head"><span class="step">2</span><h2>试运行分析</h2><span class="badge" id="analysisState">等待配置</span></div>
+    <div class="lock" id="analysisLock">请先在上方的“连接信息”里填写 BASE_URL 和 TOKEN 并保存，然后回来运行分析。</div>
+    <div class="grid">
+      <div class="field">
+        <label for="endpoint">分析接口</label>
+        <select id="endpoint"><option value="capa">正态能力分析（Capa）</option></select>
+      </div>
+      <div class="field">
+        <label for="type">分析类型</label>
+        <select id="type"><option value="CStat">CStat（Cp / Pp）</option><option value="ZBench">ZBench（基准 Z 值）</option></select>
+      </div>
+      <div class="field"><label for="variables">变量字段（多个用逗号分隔）</label><input id="variables" value="样本1"></div>
+      <div class="field"><label for="group_size">子组大小 group_size</label><input id="group_size" type="number" value="2"></div>
+      <div class="field"><label for="lspec">规格下限 lspec</label><input id="lspec" type="number" value="0"></div>
+      <div class="field"><label for="uspec">规格上限 uspec</label><input id="uspec" type="number" value="100"></div>
+      <div class="field"><label for="target">目标值 target（可选）</label><input id="target" type="number" placeholder="可留空"></div>
+    </div>
+    <div class="field">
+      <div class="label-row">
+        <label for="dataInput">原始数据 data</label>
+        <button type="button" id="sampleData">填充示例数据</button>
+      </div>
+      <textarea id="dataInput" spellcheck="false" placeholder='粘贴 JSON 数组，例如 [{"样本1":32,"样本2":53}, ...]；也可以直接粘贴一列数字。'></textarea>
+      <div class="hint">支持 JSON 对象数组，或直接粘贴一列数字（会自动生成字段名）。</div>
+      <div class="error" id="dataError"></div>
+    </div>
+    <div class="actions">
+      <button class="primary" type="button" id="run" disabled>运行分析</button>
+    </div>
+  </section>
+
+  <section class="card" id="testCard" hidden>
+    <div class="card-head"><h2>连接测试结果</h2></div>
+    <div class="checks" id="checks"></div>
+    <pre id="testDetail">{}</pre>
+  </section>
+
+  <section class="card" id="resultCard" hidden>
+    <div class="card-head"><span class="step">3</span><h2>分析结果</h2><span class="badge" id="sourceBadge">来源</span><span class="badge" id="channelBadge">频道</span></div>
+    <pre id="summary"></pre>
+    <h2 style="margin-top:16px">指标</h2>
+    <table id="metrics"></table>
+    <div class="links" id="links"></div>
+    <details style="background:transparent;border:0;padding:0">
+      <summary style="padding:10px 0">查看原始返回</summary>
+      <pre id="rawResult">{}</pre>
+    </details>
+  </section>
+</div>
+
+<div class="toast" id="toast" role="alert" aria-live="assertive">
+  <div class="toast-head"><span id="toastTitle">操作失败</span><button class="toast-close" id="toastClose" type="button" aria-label="关闭">×</button></div>
+  <div class="toast-msg" id="toastMsg"></div>
+</div>
+
+<div class="overlay" id="success" aria-hidden="true">
+  <div class="success-card">
+    <svg viewBox="0 0 80 80">
+      <circle class="ring" cx="40" cy="40" r="28"/>
+      <path class="tick" d="M26 41 L36 51 L55 30"/>
+    </svg>
+    <div class="success-title" id="successTitle">配置已保存</div>
+    <div class="success-sub" id="successSub">可以开始调用 BQL 工具了</div>
+  </div>
+</div>
+
+<script>
+const TOKEN = "__UI_TOKEN__";
+const $ = (s) => document.querySelector(s);
+const fields = [...document.querySelectorAll("[name]")];
+const numFields = new Set(["webhook.port","websocket.port","defaults.timeout_seconds","defaults.subscribe_delay_seconds","defaults.img_width","defaults.img_height","settings_ui.port"]);
+const boolFields = new Set(["websocket.tls"]);
+let tokenConfigured = false;
+let analysisUnlocked = false;
+let toastTimer = null;
+
+const SAMPLE = [
+  {"样本1":32,"样本2":53},{"样本1":57,"样本2":14},{"样本1":63,"样本2":36},
+  {"样本1":17,"样本2":26},{"样本1":9,"样本2":52},{"样本1":37,"样本2":14},
+  {"样本1":28,"样本2":17},{"样本1":65,"样本2":54},{"样本1":59,"样本2":10},
+  {"样本1":24,"样本2":62},{"样本1":11,"样本2":71},{"样本1":27,"样本2":84}
+];
+
+function setValues(cfg){
+  fields.forEach(el=>{
+    let v = el.name.split(".").reduce((o,k)=> o && o[k], cfg);
+    if (v === undefined || v === null) v = "";
+    if (boolFields.has(el.name)) v = String(!!v);
+    el.value = v;
+  });
+}
+function collect(){
+  const out = {};
+  fields.forEach(el=>{
+    const n = el.name, v = el.value;
+    if (n === "token" && !v.trim()) return;
+    let val = v;
+    if (numFields.has(n)) val = v === "" ? "" : Number(v);
+    if (boolFields.has(n)) val = v === "true";
+    n.split(".").reduce((o,k,i,arr)=>{
+      if (i === arr.length-1){ o[k] = val; return o; }
+      if (!o[k] || typeof o[k] !== "object") o[k] = {};
+      return o[k];
+    }, out);
+  });
+  return out;
+}
+function setError(name,msg){
+  const input = document.querySelector('[name="'+name+'"]');
+  const box = document.querySelector('[data-error="'+name+'"]');
+  if (!input || !box) return;
+  input.closest(".field").classList.toggle("invalid", !!msg);
+  box.textContent = msg || "";
+}
+function validateConnection(){
+  let ok = true;
+  const base = $("#base_url").value.trim();
+  if (!base){ setError("base_url","请填写 BASE_URL"); ok = false; }
+  else if (!/^https?:\/\//i.test(base)){ setError("base_url","需要以 http:// 或 https:// 开头"); ok = false; }
+  else setError("base_url","");
+  const token = $("#token").value.trim();
+  if (!token && !tokenConfigured){ setError("token","请填写 TOKEN"); ok = false; }
+  else setError("token","");
+  return ok;
+}
+function setBusy(button,busy){ button.classList.toggle("busy",busy); }
+function showSuccess(title,sub){
+  $("#successTitle").textContent = title || "配置已保存";
+  $("#successSub").textContent = sub || "";
+  const overlay = $("#success");
+  overlay.classList.remove("show");
+  void overlay.offsetWidth;
+  overlay.classList.add("show");
+  setTimeout(()=>overlay.classList.remove("show"),1900);
+}
+function showError(title,detail){
+  $("#toastTitle").textContent = title || "操作失败";
+  $("#toastMsg").textContent = detail || "请检查输入后重试。";
+  const toast = $("#toast");
+  toast.classList.remove("show","shake");
+  void toast.offsetWidth;
+  toast.classList.add("show","shake");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>toast.classList.remove("show"),7000);
+}
+function updateAnalysisLock(){
+  const cfg = collect();
+  analysisUnlocked = !!(cfg.base_url && (cfg.token || tokenConfigured));
+  $("#analysisLock").hidden = analysisUnlocked;
+  $("#run").disabled = !analysisUnlocked;
+  const state = $("#analysisState");
+  state.textContent = analysisUnlocked ? "已就绪" : "等待配置";
+  state.className = "badge " + (analysisUnlocked ? "ok" : "warn");
+}
+function renderChecks(data){
+  const wrap = $("#checks"); wrap.textContent = "";
+  [["http","HTTP 可达",data.http],["webhook","Webhook",data.webhook],["websocket","WebSocket",data.websocket]].forEach(([key,label,value])=>{
+    if (!value) return;
+    const chip = document.createElement("span");
+    chip.className = "chip " + (value.ok ? "ok" : "err");
+    chip.textContent = label + (value.ok ? " 通过" : " 失败");
+    wrap.appendChild(chip);
+  });
+  if (!wrap.children.length){ const chip=document.createElement("span"); chip.className="chip"; chip.textContent="无可用检查项"; wrap.appendChild(chip); }
+}
+function parseData(){
+  const raw = $("#dataInput").value.trim();
+  $("#dataError").textContent = "";
+  if (!raw){ $("#dataError").textContent = "请提供数据"; return null; }
+  try {
+    const value = JSON.parse(raw);
+    if (!Array.isArray(value)) throw new Error("顶层需要是数组");
+    if (!value.length) throw new Error("数组不能为空");
+    return value;
+  } catch (jsonErr) {
+    const parts = raw.split(/[\s,，]+/).filter(Boolean);
+    const nums = parts.map(Number);
+    if (parts.length && nums.every(n=>Number.isFinite(n))){
+      const name = ($("#variables").value.split(/[,，]/)[0] || "样本1").trim();
+      return nums.map(n=>({[name]:n}));
+    }
+    $("#dataError").textContent = "JSON 解析失败，且不是纯数字列表：" + jsonErr.message;
+    return null;
+  }
+}
+function buildPayload(){
+  const data = parseData();
+  if (!data) return null;
+  const variables = $("#variables").value.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
+  if (!variables.length){ showError("参数不完整","请填写变量字段"); return null; }
+  const payload = {
+    data,
+    variables,
+    type: $("#type").value,
+    lspec: Number($("#lspec").value),
+    uspec: Number($("#uspec").value),
+    group_size: Number($("#group_size").value)
+  };
+  const target = $("#target").value.trim();
+  if (target !== "") payload.target = Number(target);
+  return payload;
+}
+function renderResult(result){
+  $("#sourceBadge").textContent = "来源：" + (result.source || "未知");
+  $("#channelBadge").textContent = "频道：" + (result.channel || "-");
+  $("#summary").textContent = result.summary || "无摘要";
+  const table = $("#metrics"); table.textContent = "";
+  const values = (result.charts && result.charts[0] && result.charts[0].values) || {};
+  Object.entries(values).forEach(([k,v])=>{
+    const row = document.createElement("tr");
+    const a = document.createElement("td"); a.textContent = k;
+    const b = document.createElement("td"); b.textContent = String(v);
+    row.appendChild(a); row.appendChild(b); table.appendChild(row);
+  });
+  const links = $("#links"); links.textContent = "";
+  const minitab = (result.charts && result.charts[0] && result.charts[0].minitab) || {};
+  const candidates = [];
+  (minitab.OTGraph || []).forEach((url,i)=>candidates.push(["图表 "+(i+1),url]));
+  [["Minitab 文档",minitab.mtbOutDoc],["原始数据",minitab.data_file_path],["工作表",minitab.worksheet]].forEach(([label,url])=>{ if(url) candidates.push([label,url]); });
+  candidates.forEach(([label,url])=>{
+    const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; a.textContent = label;
+    links.appendChild(a);
+  });
+  $("#rawResult").textContent = JSON.stringify(result.raw || result,null,2);
+  $("#resultCard").hidden = false;
+}
+async function api(path, options={}){
+  const r = await fetch(path + (path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(TOKEN), {
+    headers: {"Content-Type":"application/json","X-Settings-Token":TOKEN},
+    ...options
+  });
+  let data = {};
+  try { data = await r.json(); } catch (e) { data = {error:"服务返回了非 JSON 内容"}; }
+  return {ok:r.ok, data};
+}
+async function load(){
+  const r = await api("/api/config");
+  if (!r.ok){ showError("载入配置失败", JSON.stringify(r.data)); return; }
+  setValues(r.data.config);
+  tokenConfigured = r.data.config.token === "******" || !!r.data.config.token;
+  $("#token").value = "";
+  const state = $("#tokenState");
+  state.textContent = tokenConfigured ? "已配置" : "未配置";
+  state.className = "badge " + (tokenConfigured ? "ok" : "warn");
+  $("#tokenHint").textContent = tokenConfigured ? "已保存，留空表示不修改。" : "Token 只保存在本机权限为 0600 的配置文件中。";
+  updateAnalysisLock();
+  const eps = await api("/api/endpoints");
+  if (eps.ok){
+    const select = $("#endpoint"); select.textContent = "";
+    Object.entries(eps.data.endpoints).forEach(([name,spec])=>{
+      const opt = document.createElement("option"); opt.value = name; opt.textContent = spec.name || name; select.appendChild(opt);
+    });
+  }
+}
+document.getElementById("cfg").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  if (!validateConnection()){ showError("配置未保存","请先修正上方标红的字段。"); return; }
+  const button = $("#save"); setBusy(button,true);
+  try {
+    const r = await api("/api/config", {method:"POST", body:JSON.stringify(collect())});
+    if (!r.ok){ showError("保存失败", r.data.error || JSON.stringify(r.data)); return; }
+    if ($("#token").value.trim()) tokenConfigured = true;
+    await load();
+    showSuccess("配置已保存","下一步：提供一组数据，运行分析");
+    setTimeout(()=>$("#analysisCard").scrollIntoView({behavior:"smooth",block:"start"}),450);
+  } catch (err) { showError("保存失败", String(err)); }
+  finally { setBusy(button,false); }
+});
+document.getElementById("test").addEventListener("click", async (e)=>{
+  if (!validateConnection()){ showError("无法测试","请先修正上方标红的字段。"); return; }
+  const button = e.currentTarget; setBusy(button,true);
+  try {
+    const r = await api("/api/test", {method:"POST", body:"{}"});
+    const d = r.data || {};
+    $("#testCard").hidden = false; renderChecks(d); $("#testDetail").textContent = JSON.stringify(d,null,2);
+    if (r.ok && d.ok) showSuccess("连接测试通过","下一步：提供一组数据，运行分析");
+    else showError("连接测试失败", "请查看下方测试结果，定位失败的连接项。");
+  } catch (err) { showError("连接测试失败", String(err)); }
+  finally { setBusy(button,false); }
+});
+document.getElementById("sampleData").addEventListener("click", ()=>{
+  $("#dataInput").value = JSON.stringify(SAMPLE,null,2);
+  $("#dataError").textContent = "";
+});
+document.getElementById("run").addEventListener("click", async (e)=>{
+  if (!analysisUnlocked){ showError("尚未就绪","请先保存 BASE_URL 和 TOKEN。"); return; }
+  const payload = buildPayload();
+  if (!payload) return;
+  const button = e.currentTarget; setBusy(button,true);
+  try {
+    const r = await api("/api/analyze", {method:"POST", body:JSON.stringify({endpoint:$("#endpoint").value,payload})});
+    const d = r.data || {};
+    if (!r.ok || !d.ok){ showError("分析失败", d.error || JSON.stringify(d)); return; }
+    renderResult(d.result);
+    showSuccess("分析完成","结果已展示在下方");
+    setTimeout(()=>$("#resultCard").scrollIntoView({behavior:"smooth",block:"start"}),450);
+  } catch (err) { showError("分析失败", String(err)); }
+  finally { setBusy(button,false); }
+});
+document.getElementById("reload").addEventListener("click", load);
+document.getElementById("toastClose").addEventListener("click", ()=>$("#toast").classList.remove("show"));
+["base_url","token"].forEach(id=>document.getElementById(id).addEventListener("input",updateAnalysisLock));
+load();
+</script>
+</body>
+</html>
