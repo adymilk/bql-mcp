@@ -436,7 +436,7 @@ def build_context(
         "broadcast": broadcast_text,
         "base_css": COMPONENT_CSS,
         "minitab_chart": _minitab_block(graph_url, doc_url),
-        "kpis": _kpi_cards(metrics),
+        "kpis": f'<div class="kpis">{_kpi_cards(metrics)}</div>',
         "interpretation": _interpret_block(result),
         "distribution": build_chart(metrics),
         "index_rows": index_rows,
