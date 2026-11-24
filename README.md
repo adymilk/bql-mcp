@@ -2,7 +2,7 @@
 
 一个标准 **MCP Server（stdio）**，把 BQL 的分析接口包装成通用 Agent 可直接对话调用的质量分析工具。
 
-当前版本 **v1.3.0** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **v1.3.1** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 > 装完会自动在浏览器打开本地配置页（`http://127.0.0.1:<port>/settings?token=…`）；
 > 想再打开：`~/.workbuddy/connectors/bql/bql-mcp --settings`（`--no-open` 只打印地址不弹窗）。
@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | B
 **装指定版本**（可复现部署 / 回滚）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | BQL_VERSION=1.3.0 bash
+curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | BQL_VERSION=1.3.1 bash
 ```
 
 脚本会自动：下载连接器与报告模板 → 建 venv 装依赖（检测到 `uv` 时走极速安装）→ 写入配置 → 注册到 WorkBuddy / Cursor / Claude Desktop / Codex。

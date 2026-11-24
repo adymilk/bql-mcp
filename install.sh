@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # BQL MCP Connector 一键安装脚本
 # 用法: curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | bash
-# 指定版本: BQL_VERSION=1.3.0 curl -fsSL .../install.sh | bash
+# 指定版本: BQL_VERSION=1.3.1 curl -fsSL .../install.sh | bash
 # 指定目录: BQL_MCP_DIR=/path curl -fsSL ... | bash -s -- <base_url> <token>
 set -euo pipefail
 
@@ -121,8 +121,19 @@ except (OSError, ValueError) as exc:
     print(f"  跳过 {path}：{exc}")
     sys.exit(0)
 
+if not isinstance(data, dict):
+    print(f"  跳过 {path}：顶层不是 JSON 对象")
+    sys.exit(0)
 servers = data.setdefault('mcpServers', {})
-servers['bql'] = {'command': pybin, 'args': [server]}
+if not isinstance(servers, dict):
+    print(f"  跳过 {path}：mcpServers 不是 JSON 对象")
+    sys.exit(0)
+entry = servers.get('bql')
+if not isinstance(entry, dict):
+    entry = {}
+entry['command'] = pybin
+entry['args'] = [server]
+servers['bql'] = entry
 try:
     mode = stat.S_IMODE(os.stat(path).st_mode)
 except OSError:
