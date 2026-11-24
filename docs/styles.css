@@ -234,6 +234,24 @@ main {
   line-height: 1.7;
 }
 
+.capability-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px;
+  margin: 20px auto 0;
+}
+
+.capability-strip span {
+  padding: 5px 9px;
+  color: #4e5b69;
+  background: #eef0ec;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 650;
+}
+
 .agent-install {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -481,54 +499,42 @@ main {
   line-height: 1.65;
 }
 
-.feature-grid {
+.capabilities {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  overflow: hidden;
-  background: var(--line);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.28fr);
+  gap: 90px;
 }
 
-.feature {
-  min-height: 265px;
-  padding: 28px;
-  background: var(--surface);
+.capabilities .section-heading {
+  margin-bottom: 0;
 }
 
-.feature-icon {
+.capability-ledger {
+  border-top: 1px solid var(--line-strong);
+}
+
+.capability-item {
   display: grid;
-  width: 42px;
-  height: 42px;
-  place-items: center;
-  margin-bottom: 32px;
-  border: 1px solid currentColor;
-  border-radius: 7px;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 24px;
+  padding: 25px 0;
+  border-bottom: 1px solid var(--line-strong);
 }
 
-.feature-icon.blue {
+.capability-number {
+  padding-top: 3px;
   color: var(--blue);
-  background: #f0f3ff;
+  font-size: 10px;
+  font-weight: 800;
 }
 
-.feature-icon.green {
-  color: var(--green);
-  background: #edf8f3;
-}
-
-.feature-icon.amber {
-  color: var(--amber);
-  background: #fff7ec;
-}
-
-.feature h3,
+.capability-item h3,
 .workflow-grid h3 {
   margin: 0;
   font-size: 18px;
 }
 
-.feature p,
+.capability-item p,
 .workflow-grid p {
   margin: 12px 0 0;
   color: var(--muted);
@@ -826,18 +832,14 @@ main {
     padding: 68px 0;
   }
 
-  .feature-grid,
+  .capabilities,
   .workflow-grid,
   .install-section {
     grid-template-columns: 1fr;
   }
 
-  .feature {
-    min-height: auto;
-  }
-
-  .feature-icon {
-    margin-bottom: 22px;
+  .capabilities {
+    gap: 34px;
   }
 
   .install-section {
