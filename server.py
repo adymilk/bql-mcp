@@ -1422,7 +1422,13 @@ async def bql_full_analysis(
 
     chart_endpoint = "xrchart" if group_size > 1 else "imrchart"
     chart_kind = "xr" if group_size > 1 else "imr"
-    chart_payload: dict[str, Any] = {"data": rows, "variables": [variable]}
+    # 启用全部 8 项 Nelson / Western Electric 判异规则，让控制图标出特殊原因点。
+    # 否则报告文字会给出「越限点数」，但图上没有任何红点，结论与图形不一致。
+    chart_payload: dict[str, Any] = {
+        "data": rows,
+        "variables": [variable],
+        "test": [1, 2, 3, 4, 5, 6, 7, 8],
+    }
     if group_size > 1:
         chart_payload["group_size"] = group_size
     norm_payload: dict[str, Any] = {"data": rows, "variables": [variable]}
