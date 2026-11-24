@@ -63,26 +63,31 @@ body{margin:0;color:var(--text);background:var(--bg);
   .verdict{flex-direction:column;align-items:flex-start;gap:12px}}
 </style></head><body><div class="wrap"><div class="paper">
 
-  <div class="top">
+  <div class="report-block" data-report-block="header"><div class="top">
     <div class="brand"><div class="mark">B</div><div>
       <h1>过程能力分析报告</h1>
       <p>{{subtitle}}</p>
     </div></div>
     <div class="stamp">报告编号 <b>{{report_no}}</b><br>生成时间 <b>{{generated_at}}</b><br>数据来源 <b>{{source}}</b></div>
+  </div></div>
+
+  <div class="report-block" data-report-block="verdict">{{{verdict_hero}}}</div>
+  <div class="report-block analyst-note-block" data-report-block="analyst-note" hidden>
+    <section class="analyst-note"><b>工程师评审意见</b><p data-report-conclusion></p></section>
   </div>
 
-  {{{verdict_hero}}}
+  <div class="report-block" data-report-block="main-chart">{{{primary_minitab_chart}}}</div>
 
-  {{{gate_strip}}}
+  <div class="report-block" data-report-block="gate">{{{gate_strip}}}</div>
 
-  {{{evidence_l2}}}
+  <div class="report-block" data-report-block="evidence">{{{evidence_l2}}}</div>
 
-  <div class="appendix-head">附录 · 完整输出与原始数据（点击展开）</div>
-  {{{appendix_minitab}}}
-  {{{appendix_normality}}}
-  {{{appendix_metrics}}}
-  {{{appendix_interpret}}}
-  {{{appendix_data}}}
+  <div class="report-block" data-report-block="appendix-title"><div class="appendix-head">附录 · 完整输出与原始数据（点击展开）</div></div>
+  <div class="report-block" data-report-block="appendix-minitab">{{{appendix_minitab}}}</div>
+  <div class="report-block" data-report-block="appendix-normality">{{{appendix_normality}}}</div>
+  <div class="report-block" data-report-block="appendix-metrics">{{{appendix_metrics}}}</div>
+  <div class="report-block" data-report-block="appendix-interpret">{{{appendix_interpret}}}</div>
+  <div class="report-block" data-report-block="appendix-data">{{{appendix_data}}}</div>
 
   <div class="foot">
     BQL MCP Connector · 结果来源 <code>{{source}}</code> · 频道 <code>{{channel}}</code><br>

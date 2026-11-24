@@ -107,6 +107,7 @@ html{color-scheme:light}
 }
 </style></head><body><div class="page">
 
+  <div class="report-block" data-report-block="header">
   <header class="masthead">
     <div>
       <div class="eyebrow">过程能力分析报告</div>
@@ -122,19 +123,25 @@ html{color-scheme:light}
       <span class="mast-no">报告编号 <b>{{report_no}}</b></span>
     </div>
   </header>
+  </div>
 
-  {{{verdict_hero}}}
+  <div class="report-block" data-report-block="verdict">{{{verdict_hero}}}</div>
+  <div class="report-block analyst-note-block" data-report-block="analyst-note" hidden>
+    <section class="analyst-note"><b>工程师评审意见</b><p data-report-conclusion></p></section>
+  </div>
 
-  {{{gate_strip}}}
+  <div class="report-block" data-report-block="main-chart">{{{primary_minitab_chart}}}</div>
 
-  {{{evidence_l2}}}
+  <div class="report-block" data-report-block="gate">{{{gate_strip}}}</div>
 
-  <div class="appendix-head">附录 · 完整输出与原始数据（点击展开）</div>
-  {{{appendix_minitab}}}
-  {{{appendix_normality}}}
-  {{{appendix_metrics}}}
-  {{{appendix_interpret}}}
-  {{{appendix_data}}}
+  <div class="report-block" data-report-block="evidence">{{{evidence_l2}}}</div>
+
+  <div class="report-block" data-report-block="appendix-title"><div class="appendix-head">附录 · 完整输出与原始数据（点击展开）</div></div>
+  <div class="report-block" data-report-block="appendix-minitab">{{{appendix_minitab}}}</div>
+  <div class="report-block" data-report-block="appendix-normality">{{{appendix_normality}}}</div>
+  <div class="report-block" data-report-block="appendix-metrics">{{{appendix_metrics}}}</div>
+  <div class="report-block" data-report-block="appendix-interpret">{{{appendix_interpret}}}</div>
+  <div class="report-block" data-report-block="appendix-data">{{{appendix_data}}}</div>
 
   <footer class="foot">
     BQL MCP Connector · 报告编号 <code>{{report_no}}</code> · 结果来源 <code>{{source}}</code><br>

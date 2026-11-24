@@ -2,7 +2,7 @@
 
 一个标准 **MCP Server（stdio）**，把 BQL 的分析接口包装成通用 Agent 可直接对话调用的质量分析工具。
 
-当前版本 **v1.2.0** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **v1.3.0** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 > 装完会自动在浏览器打开本地配置页（`http://127.0.0.1:<port>/settings?token=…`）；
 > 想再打开：`~/.workbuddy/connectors/bql/bql-mcp --settings`（`--no-open` 只打印地址不弹窗）。
@@ -28,10 +28,11 @@ curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | B
 **装指定版本**（可复现部署 / 回滚）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | BQL_VERSION=1.1.0 bash
+curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | BQL_VERSION=1.3.0 bash
 ```
 
 脚本会自动：下载连接器与报告模板 → 建 venv 装依赖（检测到 `uv` 时走极速安装）→ 写入配置 → 注册到 WorkBuddy / Cursor / Claude Desktop / Codex。
+无图形界面的服务器可加 `BQL_NO_UI=1` 跳过配置页启动；隔离测试还支持 `BQL_HOME` 与 `BQL_RAW_BASE`。
 装完后在 Agent 的连接器管理里信任（Trust）`bql`，直接说：
 
 > 用 BQL 分析这组数据：32,53,57,14,48,41，规格 0~100
@@ -57,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | B
 | `bql_call` | 调用接口，等待并返回完整分析结果；自动生成可视化报告 + 确定性解读 |
 | `bql_list_templates` | 列出报告模板（内置 + 用户自定义）及当前模板 |
 | `bql_set_template` | 切换报告模板，例如 `bql_set_template("audit")` |
-| `bql_export` | 把报告导出为 docx / pptx / html / md |
+| `bql_export` | 把报告导出为 PDF / Word / PPT / HTML / Markdown |
 | `bql_open_report` | 打开最近一次分析的可视化报告（可传 `path` 打开指定报告） |
 | `bql_open_settings` | 可选：打开本地可视化配置页 |
 
@@ -184,18 +185,17 @@ MCP 侧已经锁死"说多少"，接管不住的部分靠宿主规则补：
 |---|---|---|
 | 协议层 | `FastMCP(instructions=...)` | `initialize` 时下发使用纪律，支持 MCP instructions 的宿主都会读 |
 | 工具层 | `bql_quick_analysis` 的 description | 工具描述始终在模型上下文里，最稳的一道 |
-| 返回层 | 返回体只留 `answer`（两行：结论 + 报告链接） | 没东西可复述，模型自然不会扩写 |
+| 返回层 | `answer` 只包含报告链接 | 没有指标段落需要复述 |
 | 宿主层 | WorkBuddy 用户级 `MEMORY.md` 硬规则 | 唯一能真正管住宿主 Agent「播报欲」的地方，换机器/换人不迁移 |
 
 `answer` 字段就是给用户看的最终文案，直接原文输出即可：
 
 ```text
-孔径：Cpk 1.344 / Ppk 1.279 → 能力充足（n=60，超差 0 件）
-报告：file:///.../reports/capa-wb-0c0ad48eb75d.html
+报告：http://127.0.0.1:8765/report/capa-wb-0c0ad48eb75d.html?token=...
 ```
 
 报告默认按 `config.json` 的 `report.template` 渲染（默认 `aurora` 白色），
-并在 `report.auto_open` 为真时自动打开，不需要每次指定模板。
+分析完成只返回本地报告链接，不自动打开浏览器；显式调用 `bql_open_report` 时才打开报告。
 
 ## 性能设计（为什么快）
 
@@ -254,6 +254,12 @@ MCP 侧已经锁死"说多少"，接管不住的部分靠宿主规则补：
 - 对话里：`bql_set_template("audit")`
 - 配置页「报告样式」卡片直接点选
 - 编辑 `config.json`：`"report": {"template": "audit"}`
+
+### 报告编辑与导出
+
+打开报告后点右下角「编辑报告」，可修改标题和报告结论/工程师评审意见；「编辑布局」中可拖拽区块排序、隐藏暂不需要的区块，并将当前设置保存为可复用布局。系统判定、SPC 指标和分析证据保留在原始记录中，不会被评审意见覆盖。
+
+编辑完成后先保存报告，再导出 PDF 或 Word。两个格式都从已保存的 HTML 报告生成，因此会保留当前区块顺序、标题和评审意见；PDF 优先使用本机渲染器，没有渲染器时报告页会打开浏览器打印窗口，可选择「存储为 PDF」。MCP 侧也可使用 `bql_export(name, "pdf")` 或 `bql_export(name, "docx")`。
 
 ### 自定义模板
 
@@ -322,7 +328,7 @@ args = ["/Users/james/.workbuddy/connectors/bql/server.py"]
 
 - 版本号唯一来源：仓库根 `VERSION`；语义化版本，改动记录在 [CHANGELOG.md](CHANGELOG.md)，对应 git tag `vX.Y.Z` 与 GitHub Release。
 - 查当前版本：`~/.workbuddy/connectors/bql/bql-mcp --version`，或在 Agent 里调 `bql_version`。
-- 打开配置页：`bql-mcp --settings`（装完会自动打开；加 `--no-open` 只打印地址）。
+- 打开配置页：`bql-mcp --settings`（报告工作台也会由 MCP 独立进程自动启动；加 `--no-open` 只打印地址）。
 - 自检：`bql-mcp --self-check`（未配置返回码 3，方便脚本判断）。
 - 升级：重跑安装脚本即可覆盖代码与内置模板；**`config.json` 与 `templates/user/` 不会被覆盖**。
 - 回滚/锁定版本：`BQL_VERSION=1.0.0` 触发同一条安装命令。

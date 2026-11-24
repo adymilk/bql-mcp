@@ -240,7 +240,7 @@ COMPONENT_CSS = """
 .hero-head strong{font-size:13px;font-weight:600;letter-spacing:.2px}
 .hero-badge{color:var(--accent);border:1px solid var(--line);border-radius:999px;
   padding:3px 10px;font-size:10px;letter-spacing:.4px}
-.hero-img{display:block;width:100%;max-height:560px;object-fit:contain;
+.hero-img{display:block;width:100%;max-height:420px;object-fit:contain;
   border-radius:10px;border:1px solid var(--line);background:var(--surface2)}
 .hero-caption{margin:10px 2px 0;color:var(--faint);font-size:11px}
 .hero-empty{color:var(--muted);font-size:12px;padding:26px 4px;text-align:center}
@@ -826,6 +826,19 @@ def _graph_url(result: dict[str, Any]) -> str:
     return str(graph) if isinstance(graph, str) else ""
 
 
+def _doc_url(result: dict[str, Any]) -> str:
+    """取一份结果对应的 Minitab 原始文档链接。"""
+    charts = result.get("charts") or []
+    for chart in charts:
+        mt = chart.get("minitab") if isinstance(chart, dict) else None
+        if not isinstance(mt, dict):
+            continue
+        value = mt.get("mtbOutDoc")
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
 def _fetch_data_uri(url: str, timeout: float = 6.0) -> str:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 BQL-MCP"})
@@ -900,17 +913,24 @@ def embed_images_async(path: Path, urls: list[str], timeout: float = 6.0) -> Non
     threading.Thread(target=work, daemon=True, name="bql-embed-images").start()
 
 
-def _minitab_block(graph_url: str, doc_url: str, embed: bool = False) -> str:
+def _minitab_block(
+    graph_url: str,
+    doc_url: str,
+    embed: bool = False,
+    title: str = "Minitab 能力分析图",
+    caption: str = "由 Minitab 引擎生成的原始过程能力分析图。",
+) -> str:
+    """渲染首屏主图；图本身保持 Minitab 原始输出，标题说明其判读角色。"""
     head = (
-        '<div class="hero-head"><strong>Minitab 能力分析图</strong>'
+        f'<div class="hero-head"><strong>{html.escape(title)}</strong>'
         '<span class="hero-badge">服务端原始输出 · 优先展示</span></div>'
     )
     if graph_url:
         src = _fetch_data_uri(graph_url) if embed else html.escape(graph_url, quote=True)
         body = (
-            f'<img class="hero-img" src="{src}" alt="Minitab 能力分析图" '
+            f'<img class="hero-img" src="{src}" alt="{html.escape(title, quote=True)}" '
             'onerror="this.style.display=\'none\'">'
-            '<p class="hero-caption">由 Minitab 引擎生成的原始过程能力分析图。'
+            f'<p class="hero-caption">{html.escape(caption)}'
             + (f'<a href="{html.escape(doc_url, quote=True)}" target="_blank" rel="noopener">查看完整 Minitab 报告 ↗</a>' if doc_url else "")
             + '</p>'
         )
@@ -1757,6 +1777,35 @@ def build_extra(
     # 全绿：受控 + 正态 + 达到放行阈值。此时证据层收进折叠区，报告只留一屏。
     all_green = disp.get("key") == "release" and norm.get("is_normal") is True
 
+    # 首屏主图服从 SPC 判读顺序：有特殊原因时先看控制图；过程受控后再看能力图。
+    # 完整 Minitab 输出仍在附录保留，主图只承担快速定位证据的职责。
+    control_graph = _graph_url(control_result or {})
+    capability_graph = _graph_url(cap_result)
+    control_doc = _doc_url(control_result or {})
+    capability_doc = _doc_url(cap_result)
+    control_check = control.get("check") or {}
+    control_is_abnormal = bool(control.get("available") and control_check.get("controlled") is False)
+    if control_is_abnormal and control_graph:
+        primary_graph = control_graph
+        primary_doc = control_doc or capability_doc
+        primary_title = "Minitab 控制图"
+        primary_caption = "过程稳定性是能力指数的前提；本图优先用于定位特殊原因信号。"
+    elif capability_graph:
+        primary_graph = capability_graph
+        primary_doc = capability_doc or control_doc
+        primary_title = "Minitab 能力分析图"
+        primary_caption = "过程受控后，优先查看分布、中心位置与规格限的关系。"
+    elif control_graph:
+        primary_graph = control_graph
+        primary_doc = control_doc or capability_doc
+        primary_title = "Minitab 控制图"
+        primary_caption = "本次未返回能力分析图，先展示可用的过程稳定性证据。"
+    else:
+        primary_graph = ""
+        primary_doc = capability_doc or control_doc
+        primary_title = "Minitab 分析图"
+        primary_caption = "本次结果未附带 Minitab 图表。"
+
     return {
         "all_green": all_green,
         # 旧键：保留给用户自定义模板，内容与新区块等价
@@ -1774,6 +1823,10 @@ def build_extra(
             bounds=cpk_bounds, anomalies=len(anomaly_points),
         ),
         "gate_strip": _gate_strip(gate),
+        "primary_graph_url": primary_graph,
+        "primary_doc_url": primary_doc,
+        "primary_graph_title": primary_title,
+        "primary_graph_caption": primary_caption,
         "control_html": _control_body(control, show_verdict=False) if control.get("available") else "",
         "concl_control": conclusion_control(control),
         "concl_capability": conclusion_capability(cap, metrics),
@@ -2123,6 +2176,155 @@ def _fold(title: str, meta: str, body: str, open_by_default: bool = False) -> st
     )
 
 
+# 报告是单文件 HTML，但编辑状态需要能回写到本地报告目录。编辑器只依赖
+# 浏览器原生 Drag and Drop / fetch，因此打开报告时不需要额外前端依赖。
+EDITOR_STYLE = r"""<style>
+.report-block{position:relative}
+.analyst-note{padding:12px 15px;margin:0 0 16px;border:1px solid var(--line,#dfe4ec);border-left:3px solid var(--accent,#4f46e5);border-radius:8px;background:var(--surface2,#f7f9fc)}
+.analyst-note b{font-size:11px;color:var(--muted,#5a6678)}
+.analyst-note p{margin:4px 0 0;white-space:pre-wrap}
+.report-editor-toolbar{position:fixed;right:16px;top:16px;z-index:120;width:344px;max-height:calc(100vh - 32px);overflow:auto;
+  padding:18px;background:rgba(255,255,255,.98);border:1px solid var(--line,#dfe4ec);
+  border-radius:12px;box-shadow:0 18px 48px rgba(16,24,40,.18);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;color:var(--text,#0f172a)}
+.report-editor-toolbar[hidden]{display:none}
+.report-editor-toolbar [hidden]{display:none!important}
+.report-editor-toolbar .re-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:16px;font-weight:650;font-size:14px}
+.report-editor-toolbar .re-close{width:26px;height:26px;border:0;background:transparent;color:var(--muted,#5a6678);font-size:20px;line-height:1;cursor:pointer;border-radius:6px}
+.report-editor-toolbar .re-close:hover{background:var(--surface2,#f7f9fc)}
+.report-editor-toolbar .re-field{display:block;margin:0 0 12px;color:var(--muted,#5a6678);font-size:11px}
+.report-editor-toolbar input:not([type="checkbox"]),.report-editor-toolbar textarea,.report-editor-toolbar select{display:block;width:100%;margin-top:5px;border:1px solid var(--line,#dfe4ec);background:#fff;color:var(--text,#0f172a);border-radius:7px;padding:8px 9px;font:12px/1.45 inherit;outline:none}
+.report-editor-toolbar textarea{min-height:68px;resize:vertical}
+.report-editor-toolbar input:focus,.report-editor-toolbar textarea:focus,.report-editor-toolbar select:focus{border-color:var(--accent,#4f46e5);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent,#4f46e5) 14%,transparent)}
+.report-editor-toolbar input[type="checkbox"]{width:15px;height:15px;flex:none;margin:0;padding:0}
+.report-editor-toolbar .re-section-title{display:flex;justify-content:space-between;align-items:center;margin:16px 0 7px;padding-top:14px;border-top:1px solid var(--line,#dfe4ec);font-size:11px;font-weight:650;color:var(--muted,#5a6678)}
+.report-editor-toolbar .re-section-title span{white-space:nowrap}
+.report-editor-toolbar .re-section-title select{width:auto;min-width:84px;margin-top:0;padding:5px 8px}
+.report-editor-toolbar .re-note{margin:-5px 0 12px;color:var(--faint,#8a94a6);font-size:10px}
+.report-editor-toolbar .re-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--line,#dfe4ec)}
+.report-editor-toolbar button{border:1px solid var(--line,#dfe4ec);background:var(--surface2,#f7f9fc);color:var(--text,#0f172a);border-radius:7px;padding:7px 10px;cursor:pointer;font:inherit}
+.report-editor-toolbar button.primary{background:var(--accent,#4f46e5);border-color:var(--accent,#4f46e5);color:#fff}
+.report-editor-toolbar button:hover{filter:brightness(.97)}
+.report-editor-toolbar .re-list{display:flex;flex-direction:column;gap:4px;max-height:230px;overflow:auto}
+.report-editor-toolbar .re-row{display:flex;align-items:center;gap:6px;padding:5px 6px;border:1px solid var(--line,#dfe4ec);border-radius:7px;background:var(--surface2,#f7f9fc);cursor:grab}
+.report-editor-toolbar .re-row.dragging{opacity:.45}
+.report-editor-toolbar .re-row .re-grip{width:12px;flex:none;color:var(--faint,#8a94a6);text-align:center}
+.report-editor-toolbar .re-row span:nth-child(2){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.report-editor-toolbar .re-row input{accent-color:var(--accent,#4f46e5)}
+.report-editor-toolbar .re-status{min-height:16px;margin-top:8px;color:var(--muted,#5a6678)}
+.report-editor-toolbar .re-dialog{width:min(320px,calc(100vw - 40px));border:1px solid var(--line,#dfe4ec);border-radius:10px;padding:16px;color:var(--text,#0f172a);box-shadow:0 16px 48px rgba(16,24,40,.2)}
+.report-editor-toolbar .re-dialog::backdrop{background:rgba(15,23,42,.36)}
+.report-editor-toolbar .re-dialog h3{margin:0 0 12px;font-size:13px}
+.report-editor-toolbar .re-dialog label{display:block;color:var(--muted,#5a6678);font-size:11px}
+.report-editor-toolbar .re-dialog-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:14px}
+.report-editing .report-block{cursor:grab}
+.report-editing .report-block:hover{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent,#4f46e5) 15%,transparent)}
+@media(max-width:760px){.report-editor-toolbar{left:10px;right:10px;top:10px;width:auto;max-height:calc(100vh - 20px)}.report-editor-toolbar .re-list{max-height:180px}}
+@media print{.report-editor-toolbar,.report-editor-open{display:none!important}.report-block[aria-hidden="true"]{display:none!important}}
+</style>"""
+
+EDITOR_SCRIPT = r"""<script>
+(function(){
+  var reportName="__REPORT_NAME__";
+  var blocks=[].slice.call(document.querySelectorAll('.report-block[data-report-block]'));
+  if(document.querySelector('.report-editor-toolbar')) return;
+  if(!blocks.length){var root=document.querySelector('.page,.wrap')||document.body;[].slice.call(root.children).forEach(function(el,index){if(el.tagName==='SCRIPT')return;el.classList.add('report-block');el.dataset.reportBlock='section-'+(index+1)});blocks=[].slice.call(document.querySelectorAll('.report-block[data-report-block]'))}
+  if(!document.querySelector('[data-report-conclusion]')){var parent=blocks[0]&&blocks[0].parentNode;if(parent){var note=document.createElement('div');note.className='report-block analyst-note-block';note.dataset.reportBlock='analyst-note';note.hidden=true;note.innerHTML='<section class="analyst-note"><b>工程师评审意见</b><p data-report-conclusion></p></section>';parent.insertBefore(note,blocks[1]||null);blocks=[].slice.call(document.querySelectorAll('.report-block[data-report-block]'))}}
+  var labels={header:'页头与报告标题',verdict:'结论摘要',gate:'判定状态',evidence:'SPC 证据与改善建议',
+    'main-chart':'主图证据',
+    'analyst-note':'工程师评审意见',
+    'appendix-title':'附录标题','appendix-minitab':'Minitab 完整输出','appendix-normality':'正态性检验',
+    'appendix-metrics':'完整指标','appendix-interpret':'解读与风险','appendix-data':'原始数据与产出物'};
+  var toolbar=document.createElement('aside'); toolbar.className='report-editor-toolbar'; toolbar.hidden=true;
+  toolbar.innerHTML='<div class="re-head"><span>报告编辑</span><button class="re-close" data-act="close" aria-label="关闭">×</button></div>'+
+    '<label class="re-field">标题<input data-field="title" maxlength="120"></label>'+
+    '<label class="re-field">报告结论 / 工程师评审意见<textarea data-field="conclusion" maxlength="2000"></textarea></label>'+
+    '<div class="re-note">系统判定、指标与分析证据保留为原始记录。</div>'+
+    '<div class="re-section-title"><span>报告区块</span><select data-template title="应用布局"><option value="">布局</option></select></div>'+
+    '<div class="re-list"></div>'+
+    '<div class="re-actions"><button class="primary" data-act="edit">编辑内容与布局</button><button data-act="save" hidden>保存</button><button data-act="cancel" hidden>取消</button>'+
+    '<button data-act="template" hidden>保存布局</button><button data-act="pdf">PDF</button><button data-act="docx">Word</button></div>'+
+    '<div class="re-status"></div><dialog class="re-dialog"><form method="dialog"><h3>保存布局</h3>'+
+    '<label>布局名称<input data-layout-name maxlength="80" required></label>'+
+    '<div class="re-dialog-actions"><button value="cancel">取消</button><button class="primary" type="button" data-act="confirm-template">保存</button></div></form></dialog>';
+  document.body.appendChild(toolbar);
+  var list=toolbar.querySelector('.re-list'), status=toolbar.querySelector('.re-status');
+  var editing=false;
+  function apiToken(){try{return new URLSearchParams(location.search).get('token')||''}catch(e){return ''}}
+  function apiPath(path){var t=apiToken(); return path+(path.indexOf('?')>=0?'&':'?')+'token='+encodeURIComponent(t)}
+  function currentLayout(){return {order:[].slice.call(document.querySelectorAll('.report-block[data-report-block]')).map(function(b){return b.dataset.reportBlock}),
+    hidden:[].slice.call(document.querySelectorAll('.report-block[data-report-block][aria-hidden="true"]')).map(function(b){return b.dataset.reportBlock})}}
+  function applyLayout(layout){
+    if(!layout||typeof layout!=='object')return;
+    var parent=blocks[0]&&blocks[0].parentNode;
+    var footer=parent&&parent.querySelector('.foot');
+    (layout.order||[]).forEach(function(id){var block=document.querySelector('.report-block[data-report-block="'+id+'"]');if(block&&block.parentNode===parent)parent.insertBefore(block,footer||null)});
+    var hidden=layout.hidden||[];
+    blocks.forEach(function(block){var off=hidden.indexOf(block.dataset.reportBlock)>=0;block.setAttribute('aria-hidden',off?'true':'false');block.style.display=off?'none':''});
+    var title=document.querySelector('.masthead h1,.top h1,h1'),note=document.querySelector('.analyst-note-block'),conclusion=document.querySelector('[data-report-conclusion]');
+    if(layout.title&&title&&layout.useText===true){title.textContent=layout.title;document.title=layout.title}
+    if(conclusion&&typeof layout.conclusion==='string'&&layout.useText===true){conclusion.textContent=layout.conclusion;if(note)note.hidden=!layout.conclusion.trim()}
+    var ti=toolbar.querySelector('[data-field="title"]'),ci=toolbar.querySelector('[data-field="conclusion"]');
+    if(ti&&title)ti.value=title.textContent.trim();if(ci&&conclusion)ci.value=conclusion.textContent.trim();
+  }
+  function loadTemplates(){fetch(apiPath('/api/report/templates')).then(function(r){return r.json()}).then(function(x){var select=toolbar.querySelector('[data-template]');(x.templates||[]).forEach(function(t){var opt=document.createElement('option');opt.value=t.name;opt.textContent=t.name;select.appendChild(opt)});select.addEventListener('change',function(){var item=(x.templates||[]).find(function(t){return t.name===select.value});if(item){applyLayout(item.layout);renderList()}})}).catch(function(){})}
+  function renderList(){list.textContent='';[].slice.call(document.querySelectorAll('.report-block[data-report-block]')).forEach(function(block){
+    if(block.dataset.reportBlock==='analyst-note'&&!editing&&!block.textContent.trim().replace('工程师评审意见',''))return;
+    if(!block.textContent.trim()&&!block.querySelector('img,svg,table,canvas'))return;
+    var row=document.createElement('div');row.className='re-row';row.draggable=editing;row.dataset.id=block.dataset.reportBlock;
+    row.innerHTML='<span class="re-grip">≡</span><span></span><input type="checkbox" title="显示区块">';
+    row.querySelector('span:nth-child(2)').textContent=labels[block.dataset.reportBlock]||block.dataset.reportBlock;
+    var check=row.querySelector('input');check.checked=block.getAttribute('aria-hidden')!=='true';check.disabled=!editing;
+    check.addEventListener('change',function(){block.setAttribute('aria-hidden',check.checked?'false':'true');block.style.display=check.checked?'':'none'});
+    row.addEventListener('dragstart',function(e){if(!editing)return;row.classList.add('dragging');if(e.dataTransfer){e.dataTransfer.setData('text/plain',row.dataset.id);e.dataTransfer.effectAllowed='move'}});
+    row.addEventListener('dragend',function(){row.classList.remove('dragging')});
+    row.addEventListener('dragover',function(e){if(!editing)return;e.preventDefault();if(e.dataTransfer)e.dataTransfer.dropEffect='move';var drag=list.querySelector('.dragging');if(!drag||drag===row)return;var rect=row.getBoundingClientRect();list.insertBefore(drag,e.clientY<rect.top+rect.height/2?row:row.nextSibling);var db=document.querySelector('.report-block[data-report-block="'+drag.dataset.id+'"]');var rb=document.querySelector('.report-block[data-report-block="'+row.dataset.id+'"]');if(db&&rb)rb.parentNode.insertBefore(db,e.clientY<rect.top+rect.height/2?rb:rb.nextSibling)});
+    list.appendChild(row);
+  })}
+  function setEditable(on){editing=on;document.body.classList.toggle('report-editing',on);
+    var h=document.querySelector('.masthead h1,.top h1,h1'), note=document.querySelector('.analyst-note-block'), c=document.querySelector('[data-report-conclusion]');
+    var titleInput=toolbar.querySelector('[data-field="title"]'), conclusionInput=toolbar.querySelector('[data-field="conclusion"]');
+    if(titleInput&&h)titleInput.value=h.textContent.trim();if(conclusionInput&&c)conclusionInput.value=c.textContent.trim();
+    if(note)note.hidden=!on&&!c.textContent.trim();
+    [titleInput,conclusionInput].forEach(function(el){if(el)el.disabled=!on});
+    toolbar.querySelector('[data-act="edit"]').hidden=on;toolbar.querySelector('[data-act="save"]').hidden=!on;toolbar.querySelector('[data-act="cancel"]').hidden=!on;
+    toolbar.querySelector('[data-act="template"]').hidden=!on;toolbar.querySelector('[data-template]').hidden=!on;
+    toolbar.querySelector('[data-act="pdf"]').hidden=on;toolbar.querySelector('[data-act="docx"]').hidden=on;
+    toolbar.querySelector('.re-list').hidden=!on;toolbar.querySelector('.re-section-title').hidden=!on;toolbar.querySelector('.re-note').hidden=!on;
+    toolbar.querySelector('[data-act="close"]').disabled=on;
+    blocks=[].slice.call(document.querySelectorAll('.report-block[data-report-block]'));blocks.forEach(function(b){b.draggable=on});renderList();
+    status.textContent='';
+  }
+  function cleanHTML(){var clone=document.documentElement.cloneNode(true);clone.querySelectorAll('.report-editor-toolbar,.report-editor-open,.aq-rail,.dscroll-hint').forEach(function(e){e.remove()});clone.querySelectorAll('[contenteditable]').forEach(function(e){e.removeAttribute('contenteditable')});clone.querySelectorAll('.report-block').forEach(function(e){e.removeAttribute('draggable')});var note=clone.querySelector('.analyst-note-block');if(note&&!note.textContent.trim().replace('工程师评审意见',''))note.remove();return '<!doctype html>\n'+clone.outerHTML}
+  function commitFields(){var h=document.querySelector('.masthead h1,.top h1,h1'),note=document.querySelector('.analyst-note-block'),text=document.querySelector('[data-report-conclusion]');var ti=toolbar.querySelector('[data-field="title"]'),ci=toolbar.querySelector('[data-field="conclusion"]');if(h&&ti&&ti.value.trim()){h.textContent=ti.value.trim();document.title=ti.value.trim()}if(text&&ci)text.textContent=ci.value.trim();if(note&&text)note.hidden=!text.textContent.trim()}
+  toolbar.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;var act=b.dataset.act;
+    if(act==='close'){toolbar.hidden=true;if(openButton)openButton.hidden=false;return}
+    if(act==='edit'){setEditable(true);return}
+    if(act==='cancel'){location.reload();return}
+    if(act==='save'){commitFields();var payload={name:reportName,html:cleanHTML(),layout:currentLayout()};fetch(apiPath('/api/report/layout'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json()}).then(function(x){if(!x.ok)throw new Error(x.error||'保存失败');setEditable(false);status.textContent='已保存';}).catch(function(err){status.textContent=err.message})}
+    else if(act==='template'){toolbar.querySelector('.re-dialog').showModal();toolbar.querySelector('[data-layout-name]').focus()}
+    else if(act==='confirm-template'){var name=toolbar.querySelector('[data-layout-name]').value.trim();if(!name){toolbar.querySelector('[data-layout-name]').focus();return}var layout=currentLayout();fetch(apiPath('/api/report/templates'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,layout:layout})}).then(function(r){return r.json()}).then(function(x){if(!x.ok)throw new Error(x.error||'保存失败');var select=toolbar.querySelector('[data-template]'),opt=document.createElement('option');opt.value=x.name;opt.textContent=x.name;select.appendChild(opt);select.value=x.name;toolbar.querySelector('.re-dialog').close();toolbar.querySelector('[data-layout-name]').value='';status.textContent='布局已保存'}).catch(function(err){status.textContent=err.message})}
+    else if(act==='pdf'||act==='docx'){var f=act==='pdf'?'pdf':'docx';fetch(apiPath('/api/report/export'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:reportName,format:f})}).then(function(r){return r.json()}).then(function(x){if(!x.ok)throw new Error(x.error||'导出失败');if(x.download_url)window.location.href=x.download_url;status.textContent='已生成 '+f.toUpperCase()}).catch(function(err){if(f==='pdf'){window.print();status.textContent='已打开打印窗口，请选择“存储为 PDF”'}else status.textContent=err.message})}
+  });
+  loadTemplates();
+  fetch(apiPath('/api/report/layout?name='+encodeURIComponent(reportName))).then(function(r){return r.json()}).then(function(x){if(x.layout&&x.layout.order&&x.layout.order.length){applyLayout(x.layout);renderList()}}).catch(function(){});
+  renderList();
+  var openButton=document.createElement('button');openButton.className='report-editor-open';openButton.textContent='编辑报告';openButton.title='打开报告编辑';openButton.style.cssText='position:fixed;right:18px;bottom:18px;z-index:119;border:1px solid var(--line,#dfe4ec);background:var(--surface,#fff);color:var(--text,#0f172a);border-radius:8px;padding:8px 11px;box-shadow:0 8px 24px rgba(16,24,40,.12);cursor:pointer;font:12px inherit';
+  openButton.addEventListener('click',function(){openButton.hidden=true;toolbar.hidden=false;setEditable(false)});document.body.appendChild(openButton);setEditable(false);
+})();
+</script>"""
+
+
+def attach_report_editor(doc: str, report_name: str) -> str:
+    """注入报告工作台；文件仍可离线查看，保存/导出时连接本地设置服务。"""
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", report_name)
+    payload = EDITOR_STYLE + EDITOR_SCRIPT.replace("__REPORT_NAME__", safe_name)
+    marker = "</body>"
+    if marker in doc:
+        index = doc.rfind(marker)
+        return doc[:index] + payload + doc[index:]
+    return doc + payload
+
+
 def _capability_kv(metrics: dict[str, Any]) -> str:
     """能力速览：八个格子，只放判读需要的数，完整指标进附录。"""
     n_value = _num(metrics.get("n"))
@@ -2308,6 +2510,13 @@ def build_context(
         "base_css": COMPONENT_CSS,
         "spec_legend": "规格上限 USL" if (lsl_missing and metrics["usl"] is not None) else "规格限 LSL / USL",
         "minitab_chart": _minitab_block(graph_url, doc_url, embed=embed_image),
+        "primary_minitab_chart": _minitab_block(
+            extra.get("primary_graph_url") or graph_url,
+            extra.get("primary_doc_url") or doc_url,
+            embed=embed_image,
+            title=extra.get("primary_graph_title") or "Minitab 能力分析图",
+            caption=extra.get("primary_graph_caption") or "由 Minitab 引擎生成的原始分析图。",
+        ),
         "minitab_full": full["html"],
         "minitab_title": full["title"],
         "minitab_meta": full["meta"],
@@ -2388,7 +2597,9 @@ def render_report(
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     safe_channel = re.sub(r"[^A-Za-z0-9_-]", "_", channel)
-    path = REPORTS_DIR / f"{endpoint}-{safe_channel}.html"
+    report_name = f"{endpoint}-{safe_channel}.html"
+    doc = attach_report_editor(doc, report_name)
+    path = REPORTS_DIR / report_name
     path.write_text(doc, encoding="utf-8")
     return path
 

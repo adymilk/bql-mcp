@@ -3,6 +3,7 @@ import json
 import os
 import re
 import secrets
+import subprocess
 import sys
 import threading
 import time
@@ -12,7 +13,9 @@ from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.error import URLError
+from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.request import urlopen
 
 import httpx
 import websockets
@@ -43,7 +46,45 @@ REPO_URL = "https://github.com/adymilk/bql-mcp"
 
 ENDPOINTS_PATH = BASE_DIR / "endpoints.json"
 SETTINGS_HTML_PATH = BASE_DIR / "settings.html"
-UI_TOKEN = secrets.token_urlsafe(24)
+UI_TOKEN_PATH = report_module.REPORTS_DIR / ".preview-token"
+UI_URL_PATH = report_module.REPORTS_DIR / ".preview-url"
+
+
+def _load_ui_token() -> str:
+    """Persist the loopback UI token so the report service survives MCP restarts."""
+    override = os.environ.get("BQL_UI_TOKEN")
+    if override:
+        return override
+    UI_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(UI_TOKEN_PATH, os.O_RDWR | os.O_CREAT, 0o600)
+    if os.name == "nt":
+        import msvcrt
+
+        if os.fstat(fd).st_size == 0:
+            os.write(fd, b"\0")
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    with os.fdopen(fd, "r+", encoding="utf-8") as handle:
+        token = handle.read().replace("\0", "").strip()
+        if len(token) < 32:
+            token = secrets.token_urlsafe(32)
+            handle.seek(0)
+            handle.truncate()
+            handle.write(token)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.chmod(UI_TOKEN_PATH, 0o600)
+        except OSError:
+            pass
+        return token
+
+
+UI_TOKEN = _load_ui_token()
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "base_url": "",
@@ -75,7 +116,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "report": {
         "template": "aurora",
-        "auto_open": True,
         # 放行判决阈值：Cpk ≥ release_cpk 且受控 → 放行；≥ hold_cpk → 有条件放行；否则拒收
         "disposition": {
             "release_cpk": 1.33,
@@ -95,18 +135,26 @@ INSTRUCTIONS = """\
 3. 报告首屏已经是结论：放行判决 + 三个数字 + 判定状态条。不要在对话里复述判决理由、
    不要把「受控/正态/能力」三层再讲一遍，也不要抄附录里的图表与数据。
 4. 用户在追问时（"为什么"、"怎么改"、"再细说"）才展开解读，展开内容以报告里的结论带与改善建议为准，不要自己另编一套。
-5. 报告默认使用 config.json 中 report.template 指定的模板（默认 aurora，白色）渲染，无需每次传模板。
-6. 若用户明确要求"换模板/换配色/导出 Word/PPT"，再调用 bql_set_template 或 bql_export。
+5. 报告默认使用 config.json 中 report.template 指定的模板（默认 aurora，白色）渲染，无需每次传模板；分析完成只返回报告链接，不自动打开浏览器。
+6. 若用户明确要求"换模板/导出 PDF/Word/PPT"，调用 bql_set_template 或 bql_export；报告页面支持编辑标题、评审意见与区块布局。
 
-默认流程：bql_full_analysis 一步出完整报告（能力 + 控制图 + 正态性）→ 报告自动打开 → 对话里只留两三行结论。
+默认流程：bql_full_analysis 一步出完整报告（能力 + 控制图 + 正态性）→ 返回报告链接；对话里只留报告链接。
 只有用户明确说"只要个 Cpk 数字"时，才用更轻的 bql_quick_analysis。
 """
 
 INSTRUCTIONS += f"\n当前连接器版本 v{__version__}（仓库 {REPO_URL}）。"
 
 
-def report_should_auto_open(config: dict[str, Any]) -> bool:
-    return bool((config.get("report") or {}).get("auto_open", True))
+def report_browser_url(path: str | Path) -> str:
+    """用本机受令牌保护的路由打开报告，以启用保存与导出工作台。"""
+    target = Path(path).resolve()
+    report_dir = report_module.REPORTS_DIR.resolve()
+    if target.suffix.lower() != ".html" or target.parent != report_dir or not target.is_file():
+        raise ValueError("报告路径无效")
+    # 报告分析进程与本地工作台分离；工作台子进程内部直接复用自己的监听地址。
+    settings = settings_url() if os.environ.get("BQL_UI_ONLY") == "1" else ensure_ui_service()
+    parsed = urlparse(settings)
+    return f"{parsed.scheme}://{parsed.netloc}/report/{quote(target.name)}?token={quote(UI_TOKEN)}"
 
 
 def _is_configured(cfg: dict[str, Any]) -> bool:
@@ -139,6 +187,9 @@ WEBHOOK_RESULTS: dict[str, Any] = {}
 WEBHOOK_LOCK = threading.Lock()
 _settings_server: Optional[ThreadingHTTPServer] = None
 _settings_thread: Optional[threading.Thread] = None
+_ui_process: Optional[subprocess.Popen[Any]] = None
+_ui_url: str = ""
+_ui_start_lock = threading.Lock()
 _webhook_server: Optional[ThreadingHTTPServer] = None
 _webhook_thread: Optional[threading.Thread] = None
 _LAST_REPORT: Optional[str] = None
@@ -814,7 +865,56 @@ class SettingsHandler(BaseHTTPRequestHandler):
         elif path == "/api/report":
             report_dir = report_module.REPORTS_DIR
             files = sorted(report_dir.glob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True) if report_dir.exists() else []
-            self._reply(200, {"ok": bool(files), "path": str(files[0]) if files else "", "count": len(files)})
+            requested = str((parse_qs(urlparse(self.path).query).get("name") or [""])[0])
+            target = next((p for p in files if p.name == requested), files[0] if files else None)
+            self._reply(200, {"ok": bool(target), "path": str(target) if target else "", "name": target.name if target else "",
+                              "count": len(files), "editor_url": report_browser_url(target) if target else ""})
+        elif path.startswith("/report/"):
+            name = unquote(path[len("/report/"):])
+            target = (report_module.REPORTS_DIR / name).resolve()
+            if target.suffix.lower() != ".html" or target.parent != report_module.REPORTS_DIR.resolve() or not target.exists():
+                self._reply(404, {"error": "report not found"})
+                return
+            self._reply(200, target.read_text(encoding="utf-8"), "text/html")
+        elif path == "/api/report/layout":
+            query = parse_qs(urlparse(self.path).query)
+            name = str((query.get("name") or [""])[0])
+            layout_path = report_module.REPORTS_DIR / (Path(name).stem + ".layout.json") if name else None
+            if layout_path and layout_path.exists():
+                try:
+                    self._reply(200, {"ok": True, "name": name, "layout": json.loads(layout_path.read_text(encoding="utf-8"))})
+                    return
+                except (OSError, ValueError):
+                    pass
+            self._reply(200, {"ok": True, "name": name, "layout": {}})
+        elif path == "/api/report/templates":
+            template_dir = report_module.REPORTS_DIR / "layouts"
+            items = []
+            if template_dir.exists():
+                for file in sorted(template_dir.glob("*.json")):
+                    try:
+                        item = json.loads(file.read_text(encoding="utf-8"))
+                        if isinstance(item, dict) and isinstance(item.get("layout"), dict):
+                            items.append({"name": str(item.get("name") or file.stem), "layout": item["layout"]})
+                    except (OSError, ValueError):
+                        continue
+            self._reply(200, {"ok": True, "templates": items})
+        elif path.startswith("/download/"):
+            name = unquote(path[len("/download/"):])
+            export_dir = (report_module.REPORTS_DIR / "exports").resolve()
+            target = (export_dir / Path(name).name).resolve()
+            if Path(name).name != name or target.parent != export_dir or target.suffix.lower() not in {".pdf", ".docx"} or not target.is_file():
+                self._reply(404, {"error": "file not found"})
+                return
+            content_type = "application/pdf" if target.suffix.lower() == ".pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            payload = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Content-Disposition", f'attachment; filename="{target.name}"')
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(payload)
         else:
             self._reply(404, {"error": "not found"})
 
@@ -843,6 +943,50 @@ class SettingsHandler(BaseHTTPRequestHandler):
                     )
                 )
                 self._reply(200, {"ok": True, "result": result})
+            except Exception as exc:
+                self._reply(200, {"ok": False, "error": str(exc)})
+        elif path == "/api/report/layout":
+            body = self._json_body()
+            name = str(body.get("name") or "")
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+\.html", name):
+                self._reply(400, {"ok": False, "error": "报告名称无效"})
+                return
+            target = (report_module.REPORTS_DIR / name).resolve()
+            if target.parent != report_module.REPORTS_DIR.resolve() or not target.exists():
+                self._reply(404, {"ok": False, "error": "报告不存在"})
+                return
+            edited = body.get("html")
+            if not isinstance(edited, str) or "<html" not in edited.lower() or len(edited) > 30 * 1024 * 1024:
+                self._reply(400, {"ok": False, "error": "报告内容无效"})
+                return
+            target.write_text(edited, encoding="utf-8")
+            layout = body.get("layout") if isinstance(body.get("layout"), dict) else {}
+            target.with_suffix(".layout.json").write_text(
+                json.dumps(layout, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            self._reply(200, {"ok": True, "name": name, "path": str(target), "layout": layout})
+        elif path == "/api/report/templates":
+            body = self._json_body()
+            name = str(body.get("name") or "").strip()
+            layout = body.get("layout")
+            if not name or len(name) > 80 or not isinstance(layout, dict):
+                self._reply(400, {"ok": False, "error": "模板名称或布局无效"})
+                return
+            template_dir = report_module.REPORTS_DIR / "layouts"
+            template_dir.mkdir(parents=True, exist_ok=True)
+            template_id = __import__("hashlib").sha256(name.encode("utf-8")).hexdigest()[:16]
+            template_path = template_dir / f"{template_id}.json"
+            template_path.write_text(json.dumps({"name": name, "layout": layout}, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._reply(200, {"ok": True, "name": name})
+        elif path == "/api/report/export":
+            body = self._json_body()
+            try:
+                import exporter as exporter_module
+                name = str(body.get("name") or "")
+                fmt = str(body.get("format") or "docx")
+                output = exporter_module.export(name, fmt)
+                self._reply(200, {"ok": True, "format": fmt.lower().lstrip("."), "path": str(output),
+                                  "download_url": "/download/" + quote(output.name) + "?token=" + quote(UI_TOKEN)})
             except Exception as exc:
                 self._reply(200, {"ok": False, "error": str(exc)})
         else:
@@ -892,6 +1036,75 @@ def ensure_settings_server() -> str:
     _settings_thread = threading.Thread(target=server.serve_forever, daemon=True)
     _settings_thread.start()
     return settings_url()
+
+
+def _write_ui_url(url: str) -> None:
+    UI_URL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = UI_URL_PATH.with_name(UI_URL_PATH.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(url)
+    os.replace(tmp, UI_URL_PATH)
+
+
+def _running_ui_url() -> str:
+    try:
+        url = UI_URL_PATH.read_text(encoding="utf-8").strip()
+        parsed = urlparse(url)
+        if parsed.scheme != "http" or not parsed.netloc:
+            return ""
+        health_url = f"{parsed.scheme}://{parsed.netloc}/api/report?token={quote(UI_TOKEN)}"
+        with urlopen(health_url, timeout=0.8) as response:
+            if response.status != 200:
+                return ""
+        return f"{parsed.scheme}://{parsed.netloc}/settings?token={quote(UI_TOKEN)}"
+    except (OSError, ValueError, URLError):
+        return ""
+
+
+def ensure_ui_service() -> str:
+    """Find or launch the independent loopback service for report editing and export."""
+    global _ui_process, _ui_url
+    if os.environ.get("BQL_UI_ONLY") == "1":
+        return settings_url()
+    with _ui_start_lock:
+        running = _running_ui_url()
+        if running:
+            _ui_url = running
+            return running
+
+        if _ui_process is None or _ui_process.poll() is not None:
+            env = os.environ.copy()
+            env["BQL_UI_ONLY"] = "1"
+            env["BQL_UI_TOKEN"] = UI_TOKEN
+            spawn_options: dict[str, Any] = {}
+            if os.name == "nt":
+                spawn_options["creationflags"] = (
+                    subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+                )
+            else:
+                spawn_options["start_new_session"] = True
+            _ui_process = subprocess.Popen(
+                [sys.executable, str(BASE_DIR / "server.py"), "--ui-only"],
+                cwd=str(BASE_DIR),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                **spawn_options,
+            )
+
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline:
+            if _ui_process.poll() is not None:
+                break
+            running = _running_ui_url()
+            if running:
+                _ui_url = running
+                return running
+            time.sleep(0.1)
+        raise RuntimeError("本地报告工作台启动失败；请检查 settings_ui 监听端口与连接器运行权限。")
 
 
 def settings_url() -> str:
@@ -1104,7 +1317,7 @@ async def bql_quick_analysis(
     data 支持 [32,53,57] 或 "32,53,57" 或 [{"x":32},{"x":53}]；
     lspec/uspec 为规格下限/上限，target 可选。
 
-    报告会用 config.json 里的默认模板（默认 aurora 白色）自动渲染并打开。
+    报告会用 config.json 里的默认模板（默认 aurora 白色）自动渲染并返回链接。
     调用成功后：只把返回的 answer 原文贴给用户（已含结论与报告链接），
     不要复述字段、不要逐项解释指标；用户追问时再展开。
     """
@@ -1126,20 +1339,16 @@ async def bql_quick_analysis(
     charts = result.get("charts") or [{}]
     minitab = charts[0].get("minitab") if isinstance(charts[0], dict) else {}
     minitab = minitab if isinstance(minitab, dict) else {}
-    out_of_spec, out_text = _out_of_spec(metrics, len(values))
+    out_of_spec, _ = _out_of_spec(metrics, len(values))
 
     cpk = report_module._fmt(metrics["cpk"], 3)
     ppk = report_module._fmt(metrics["ppk"], 3)
     report_path = result.get("report_path")
-    report_url = Path(report_path).as_uri() if report_path else ""
+    editor_url = report_browser_url(report_path) if report_path else ""
+    report_url = editor_url
 
-    # 报告默认自动打开：用户要的是"看到结果"，不是"读到一段指标罗列"
+    # 分析默认只返回报告链接；需要时由用户通过 bql_open_report 显式打开。
     opened = False
-    if report_url and report_should_auto_open(load_config()):
-        try:
-            opened = bool(webbrowser.open(report_url))
-        except Exception:
-            opened = False
 
     interpretation = result.get("interpretation") or {}
     headline = str(interpretation.get("headline") or "").strip()
@@ -1149,12 +1358,7 @@ async def bql_quick_analysis(
     disp = report_module.disposition(
         None, metrics["cpk"], out_of_spec, (config.get("report") or {}).get("disposition")
     )
-    answer = (f"{variable}：{disp['label']}（{status['grade']} 级） · "
-              f"Cpk {cpk} / Ppk {ppk} · {out_text} / n={len(values)}")
-    if disp["key"] == "unverified":
-        answer += "\n本次未做控制图：补一次 I-MR / Xbar-R 才能判放行。"
-    if report_url:
-        answer += f"\n报告：{report_url}"
+    answer = f"报告：{report_url}" if report_url else "报告生成完成，但未取得报告链接。"
 
     return {
         "ok": True,
@@ -1270,7 +1474,8 @@ async def bql_full_analysis(
         str(cap_result.get("source") or ""), cap_result.get("broadcast") or {},
         template=template_name, extra=extra,
     )
-    report_url = Path(report_path).as_uri()
+    editor_url = report_browser_url(report_path)
+    report_url = editor_url
 
     # 后台把三张图内嵌成 base64，报告可离线归档
     try:
@@ -1284,51 +1489,19 @@ async def bql_full_analysis(
         pass
 
     opened = False
-    if report_should_auto_open(config):
-        try:
-            opened = bool(webbrowser.open(report_url))
-        except Exception:
-            opened = False
 
     cpk = report_module._fmt(metrics.get("cpk"), 3)
     ppk = report_module._fmt(metrics.get("ppk"), 3)
-    out_of_spec, out_text = _out_of_spec(metrics, len(values))
+    out_of_spec, _ = _out_of_spec(metrics, len(values))
     norm_stats = report_module.normality_summary(norm_result, cap_payload)
     control = report_module.control_summary(chart_result, cap_payload, chart_kind) if chart_result else {"available": False}
     check = control.get("check") or {}
-
-    line2 = []
-    if control.get("available"):
-        if check.get("controlled"):
-            line2.append("受控：是")
-        else:
-            reasons = []
-            if check.get("beyond") or check.get("beyond_second"):
-                part = f"越限 {check.get('beyond') or 0} 点"
-                if check.get("beyond_second"):
-                    part = (f"{check.get('top_label') or 'I'} 图 {check.get('beyond') or 0} 点"
-                            f" / {check.get('second_label') or 'MR'} 图 {check['beyond_second']} 点")
-                reasons.append(part)
-            if check.get("rule2"):
-                reasons.append(f"连续同侧 {check.get('longest_run')} 点")
-            if check.get("rule3"):
-                reasons.append(f"单调趋势 {check.get('longest_trend')} 点")
-            line2.append("受控：否（" + " / ".join(reasons or ["异常信号"]) + "）")
-    if norm_stats:
-        line2.append(f"正态：{'是' if norm_stats.get('is_normal') else '否'}（AD {report_module._fmt(norm_stats.get('ad'), 3)}，p {report_module._fmt(norm_stats.get('p_value'), 3)}）")
 
     disp = extra.get("disposition") or {}
     cpk_lower = report_module._fmt(
         quality_module.cpk_lower_bound(metrics.get("cpk"), metrics.get("n") or len(values)), 3
     )
-    answer = (
-        f"{variable}：{disp.get('label') or status['label']}（{status['grade']} 级）"
-        f" · Cpk {cpk} / Ppk {ppk} · 95% 下限 {cpk_lower}"
-        f" · {out_text} / n={len(values)}"
-    )
-    if line2:
-        answer += "\n" + "｜".join(line2)
-    answer += f"\n报告：{report_url}"
+    answer = f"报告：{report_url}" if report_url else "报告生成完成，但未取得报告链接。"
 
     return {
         "ok": True,
@@ -1457,7 +1630,7 @@ def bql_set_template(name: str) -> dict[str, Any]:
 
 @mcp.tool()
 def bql_export(name: str, format: str = "docx") -> dict[str, Any]:
-    """导出一份分析报告。name 为报告文件名（可从 bql://reports 获取），format 支持 docx/pptx/html/md。
+    """导出一份分析报告。name 为报告文件名（可从 bql://reports 获取），format 支持 pdf/docx/pptx/html/md。
 
     导出结果保存到 reports/exports/ 目录，返回文件路径。
     """
@@ -1485,18 +1658,18 @@ def bql_open_report(path: Optional[str] = None) -> str:
     if not target or not Path(target).exists():
         raise ValueError("没有可打开的分析报告，请先调用 bql_call 运行一次分析。")
     _LAST_REPORT = target
-    url = Path(target).as_uri()
+    editor_url = report_browser_url(target)
     try:
-        webbrowser.open(url)
+        webbrowser.open(editor_url)
     except Exception:
         pass
-    return url
+    return editor_url
 
 
 @mcp.tool()
 def bql_open_settings() -> str:
     """打开本地 BQL 连接器配置页（可选）。也可直接用 bql_configure 在对话里配置。"""
-    url = ensure_settings_server()
+    url = ensure_ui_service()
     try:
         webbrowser.open(url)
     except Exception:
@@ -1534,7 +1707,7 @@ def bql_analyze_workflow(industry: str = "通用制造") -> str:
         "2. 用户已给数据 + 规格限时，**直接调用 bql_quick_analysis(data=..., lspec=..., uspec=...)**，"
         "不要先 list/describe 接口，也不要重复确认。\n"
         "3. 只有用户要跑非能力分析接口时，才用 bql_describe_endpoint → bql_call。\n"
-        "4. 拿到结果后直接给结论：判定等级、Cpk/Ppk、主要风险、报告路径；不要复述全部原始字段。\n"
+        "4. 拿到结果后直接返回报告链接；用户追问时再结合报告解释。\n"
         f"5. 用行业背景「{industry}」补充解读，输出结论摘要与行动建议。\n"
         "6. 用户要文件时再用 bql_export 导出。\n"
     )
@@ -1552,11 +1725,30 @@ if __name__ == "__main__":
         print(f"templates : {', '.join(t.get('name', '') for t in report_templates.list_templates())}")
         print(f"configured: {'yes' if configured else 'no（需 base_url + token）'}")
         raise SystemExit(0 if configured else 3)
+    if "--ui-only" in sys.argv:
+        os.environ["BQL_UI_ONLY"] = "1"
+        url = ensure_settings_server()
+        try:
+            _write_ui_url(url)
+        except OSError:
+            pass
+        print(url, flush=True)
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            pass
+        raise SystemExit(0)
     if "--settings" in sys.argv:
         # 装完直接给用户打开配置页：常驻本地 127.0.0.1，URL 带一次性 token
         url = ensure_settings_server()
         try:
-            (BASE_DIR / "settings.url").write_text(url, encoding="utf-8")
+            settings_url_path = BASE_DIR / "settings.url"
+            fd = os.open(settings_url_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(url)
+            os.chmod(settings_url_path, 0o600)
+            _write_ui_url(url)
         except OSError:
             pass
         print(url, flush=True)
@@ -1572,4 +1764,9 @@ if __name__ == "__main__":
             pass
         raise SystemExit(0)
     save_config(load_config())
+    # MCP 与报告工作台分进程运行；工作台提前启动，分析工具只需返回可访问链接。
+    try:
+        ensure_ui_service()
+    except Exception as exc:
+        print(f"BQL report UI unavailable: {exc}", file=sys.stderr)
     mcp.run(transport="stdio")
