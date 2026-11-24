@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 # BQL MCP Connector 一键安装脚本
-# 用法: curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | bash
-# 指定版本: BQL_VERSION=1.3.1 curl -fsSL .../install.sh | bash
+# 用法: curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/heads/main/install.sh | bash
+# 指定版本: BQL_VERSION=1.3.2 curl -fsSL .../install.sh | bash
 # 指定目录: BQL_MCP_DIR=/path curl -fsSL ... | bash -s -- <base_url> <token>
 set -euo pipefail
 
 REPO="https://github.com/adymilk/bql-mcp"
 REF="${BQL_REF:-${BQL_VERSION:+v${BQL_VERSION}}}"
 REF="${REF:-main}"
-RAW="${BQL_RAW_BASE:-https://raw.githubusercontent.com/adymilk/bql-mcp/$REF}"
+if [[ "$REF" == v* ]]; then
+  RAW_REF="refs/tags/$REF"
+elif [[ "$REF" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+  RAW_REF="$REF"
+else
+  RAW_REF="refs/heads/$REF"
+fi
+RAW="${BQL_RAW_BASE:-https://github.com/adymilk/bql-mcp/raw/$RAW_REF}"
 USER_HOME="${BQL_HOME:-$HOME}"
 DEST="${BQL_MCP_DIR:-$USER_HOME/.workbuddy/connectors/bql}"
 PY="${PYTHON:-python3}"

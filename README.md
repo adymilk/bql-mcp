@@ -2,7 +2,7 @@
 
 一个标准 **MCP Server（stdio）**，把 BQL 的分析接口包装成通用 Agent 可直接对话调用的质量分析工具。
 
-当前版本 **v1.3.1** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **v1.3.2** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 > 装完会自动在浏览器打开本地配置页（`http://127.0.0.1:<port>/settings?token=…`）；
 > 想再打开：`~/.workbuddy/connectors/bql/bql-mcp --settings`（`--no-open` 只打印地址不弹窗）。
@@ -11,24 +11,24 @@
 
 把这句话（连同命令）整段丢给任意支持 MCP 的 Agent 即可：
 
-> 帮我安装 BQL MCP 连接器：执行 `curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | bash`，装完把 bql 注册进本机 MCP 配置，然后用 `bql-mcp --self-check` 把版本和配置状态报给我。
+> 帮我安装 BQL MCP 连接器：执行 `curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/heads/main/install.sh | bash`，装完把 bql 注册进本机 MCP 配置，然后用 `bql-mcp --self-check` 把版本和配置状态报给我。
 
 只想要命令：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | bash
+curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/heads/main/install.sh | bash
 ```
 
 **零配置版**（装完即用，无需再填任何东西）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | BQL_BASE_URL=https://your-bql-host BQL_TOKEN=your-token bash
+curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/heads/main/install.sh | BQL_BASE_URL=https://your-bql-host BQL_TOKEN=your-token bash
 ```
 
 **装指定版本**（可复现部署 / 回滚）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/adymilk/bql-mcp/main/install.sh | BQL_VERSION=1.3.1 bash
+curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/heads/main/install.sh | BQL_VERSION=1.3.2 bash
 ```
 
 脚本会自动：下载连接器与报告模板 → 建 venv 装依赖（检测到 `uv` 时走极速安装）→ 写入配置 → 注册到 WorkBuddy / Cursor / Claude Desktop / Codex。
