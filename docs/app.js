@@ -21,7 +21,8 @@ async function resolveLatestInstall() {
 
     const command = `curl -fsSL https://raw.githubusercontent.com/${repository}/${sha}/install.sh | BQL_REF=${sha} bash`;
     installCommand.textContent = command;
-    agentPrompt.textContent = `帮我安装 BQL MCP：执行 ${command}，然后注册 bql、运行 bql-mcp --self-check，并告诉我版本和配置状态。`;
+    agentPrompt.textContent = "帮我安装最新版 BQL Minitab MCP，并完成客户端注册和自检。";
+    agentPrompt.dataset.copyValue = `帮我安装 BQL MCP：执行 ${command}，然后注册 bql、运行 bql-mcp --self-check，并告诉我版本和配置状态。`;
 
     const versionResponse = await fetch(
       `https://raw.githubusercontent.com/${repository}/${sha}/VERSION`,
@@ -37,7 +38,8 @@ async function resolveLatestInstall() {
     }
   } catch {
     installCommand.textContent = fallbackCommand;
-    agentPrompt.textContent = `帮我安装 BQL MCP：执行 ${fallbackCommand}，然后注册 bql、运行 bql-mcp --self-check，并告诉我版本和配置状态。`;
+    agentPrompt.textContent = "帮我安装最新版 BQL Minitab MCP，并完成客户端注册和自检。";
+    agentPrompt.dataset.copyValue = `帮我安装 BQL MCP：执行 ${fallbackCommand}，然后注册 bql、运行 bql-mcp --self-check，并告诉我版本和配置状态。`;
   }
 }
 
@@ -50,7 +52,7 @@ for (const button of copyButtons) {
     const target = document.getElementById(button.dataset.copyTarget);
     if (!target) return;
 
-    const text = target.textContent.trim();
+    const text = target.dataset.copyValue || target.textContent.trim();
     try {
       await navigator.clipboard.writeText(text);
     } catch {

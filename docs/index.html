@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>世界首个全功能 Minitab MCP 服务器 | BQL MCP</title>
-  <meta name="description" content="BQL MCP 是世界首个基于 Minitab 的全功能 MCP 服务器，覆盖 SPC、MSA、假设检验、回归与 DOE、可靠性和可视化。">
+  <title>Minitab MCP | 全功能 Minitab 接入 AI</title>
+  <meta name="description" content="BQL MCP 是面向质量与制造团队的 Minitab MCP，覆盖 SPC、MSA、回归与 DOE、可靠性和可视化，并交付可编辑质量报告。">
   <meta name="theme-color" content="#f7f8f5">
-  <meta property="og:title" content="世界首个全功能 Minitab MCP 服务器 | BQL MCP">
-  <meta property="og:description" content="首个基于 Minitab 的全功能 MCP 服务器。让 AI 直接调用 110 个分析接口并交付可编辑报告。">
+  <meta property="og:title" content="Minitab MCP | 全功能 Minitab 接入 AI">
+  <meta property="og:description" content="让 AI 直接调用 110 个 Minitab 分析接口，把分析结果变成可编辑、可交付的质量报告。">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://adymilk.github.io/bql-mcp/">
   <meta property="og:image" content="https://adymilk.github.io/bql-mcp/assets/report-preview.png">
@@ -39,23 +39,23 @@
   </header>
 
   <main id="main">
-    <aside class="announcement" aria-label="产品里程碑">
-      <span class="announcement-label">World's first</span>
-      <strong>首个基于 Minitab 的 MCP 服务器</strong>
+    <aside class="announcement" aria-label="产品定位">
+      <span class="announcement-label">Minitab MCP</span>
+      <strong>全功能 Minitab，接入你的 Agent 工作流</strong>
       <a href="#install">立即安装 <span aria-hidden="true">→</span></a>
     </aside>
 
     <section class="hero" id="top" aria-labelledby="hero-title">
       <div class="hero-kicker">
         <span class="status-dot" aria-hidden="true"></span>
-        Full-featured Minitab MCP for AI
+        Minitab Analytics for AI Agents
       </div>
       <h1 id="hero-title">
-        <span class="hero-line">世界首个 Minitab MCP 服务器</span>
-        <span class="hero-line accent">让 AI 直接调用全功能 Minitab</span>
+        <span class="hero-line">把 Minitab 接入你的 AI 工作流</span>
+        <span class="hero-line accent">一句话完成分析，交付质量报告</span>
       </h1>
       <p class="hero-copy">
-        把 Minitab 的全部分析能力接入 AI 工作流。从 SPC、MSA、控制图到假设检验、回归与 DOE，一句话完成分析，并将结果交付为可编辑报告。
+        面向质量与制造团队的 Minitab MCP。让 Agent 直接调用 SPC、MSA、控制图、回归与 DOE 等完整能力，并把结果整理成可审核、可导出的质量报告。
       </p>
       <div class="capability-strip" aria-label="Minitab 分析能力">
         <span>SPC 与能力分析</span>
@@ -71,7 +71,7 @@
           <span>Copy for any Agent</span>
           <strong>安装口令</strong>
         </div>
-        <code id="agent-install-prompt">帮我安装 BQL MCP：执行 curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/heads/main/install.sh | bash，然后注册 bql、运行 bql-mcp --self-check，并告诉我版本和配置状态。</code>
+        <code id="agent-install-prompt" data-copy-value="帮我安装 BQL MCP：执行 curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/heads/main/install.sh | bash，然后注册 bql、运行 bql-mcp --self-check，并告诉我版本和配置状态。">帮我安装最新版 BQL Minitab MCP，并完成客户端注册和自检。</code>
         <button class="copy-button agent-copy" type="button" data-copy-target="agent-install-prompt" aria-label="复制 Agent 安装口令">
           <svg class="icon-copy" aria-hidden="true" viewBox="0 0 20 20" width="18" height="18">
             <rect x="6.5" y="5.5" width="9" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/>
@@ -89,8 +89,8 @@
             <path d="M4 10h12M11 5l5 5-5 5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
           </svg>
         </a>
-        <a class="button button-secondary" href="https://github.com/adymilk/bql-mcp" target="_blank" rel="noopener">
-          查看源码
+        <a class="button button-secondary" href="#capabilities">
+          查看能力
         </a>
       </div>
       <dl class="proof-grid" aria-label="产品概况">
@@ -99,8 +99,8 @@
           <dd>Minitab 分析接口</dd>
         </div>
         <div>
-          <dt>12</dt>
-          <dd>MCP 工具</dd>
+          <dt>7</dt>
+          <dd>大分析领域</dd>
         </div>
         <div>
           <dt>PDF / Word</dt>
@@ -124,36 +124,36 @@
       </div>
       <div class="preview-caption">
         <span id="preview-title">真实分析报告</span>
-        <span>决策结论 + SPC 证据 + 完整 Minitab 输出</span>
+        <span>可编辑结论 + Minitab 原始图表 + 报告导出</span>
       </div>
     </section>
 
     <section class="section capabilities" id="capabilities" aria-labelledby="capabilities-title">
       <div class="section-heading">
-        <p class="section-index">01 / Full Minitab</p>
-        <h2 id="capabilities-title">不止 SPC，<br>是完整的 Minitab。</h2>
-        <p>110 个分析接口覆盖质量诊断、实验设计与可靠性。一套标准 MCP 协议统一调用，并把结果整理成可以交付的报告。</p>
+        <p class="section-index">01 / Capabilities</p>
+        <h2 id="capabilities-title">一个接口，<br>覆盖完整的分析链路。</h2>
+        <p>不止 SPC。110 个 Minitab 接口覆盖质量诊断、实验设计与可靠性，一套标准 MCP 协议统一调用，并把结果整理成可交付报告。</p>
       </div>
       <div class="capability-ledger">
         <article class="capability-item">
           <span class="capability-number">01</span>
           <div>
-            <h3>完整的 Minitab 分析面</h3>
+            <h3>完整的 Minitab 能力入口</h3>
             <p>SPC、MSA、控制图、假设检验、回归与 DOE、分布与可靠性、图形可视化。</p>
           </div>
         </article>
         <article class="capability-item">
           <span class="capability-number">02</span>
           <div>
-            <h3>分析结果直接成为报告</h3>
-            <p>标题、结论与布局可编辑，Minitab 图表原样呈现，一键导出 PDF 或 Word。</p>
+            <h3>分析结果成为可交付报告</h3>
+            <p>标题、结论与布局可编辑，Minitab 图表原样呈现，一键导出 PDF 或 Word，减少人工整理与复制。</p>
           </div>
         </article>
         <article class="capability-item">
           <span class="capability-number">03</span>
           <div>
-            <h3>本地运行，持续可用</h3>
-            <p>报告工作台独立于 MCP 进程，使用本地权限令牌；Agent 重连后，历史报告仍可访问。</p>
+            <h3>结果可追溯，留在本机</h3>
+            <p>报告工作台独立运行并使用本地权限令牌；Agent 重连后，历史分析与报告仍可访问。</p>
           </div>
         </article>
       </div>
@@ -162,23 +162,23 @@
     <section class="section workflow" id="workflow" aria-labelledby="workflow-title">
       <div class="section-heading compact">
         <p class="section-index">02 / Workflow</p>
-        <h2 id="workflow-title">一句话，走完分析闭环。</h2>
+        <h2 id="workflow-title">从问题到报告，只需一次对话。</h2>
       </div>
       <div class="workflow-grid">
         <article>
           <span>1</span>
           <h3>描述问题</h3>
-          <p>提供测量值、规格上下限和子组大小。</p>
+          <p>用自然语言给出数据、规格和业务问题。</p>
         </article>
         <article>
           <span>2</span>
           <h3>Agent 调用 Minitab</h3>
-          <p>通过标准 MCP 工具调用 BQL 的完整 Minitab 能力。</p>
+          <p>Agent 通过标准 MCP 工具调用 Minitab 分析。</p>
         </article>
         <article>
           <span>3</span>
           <h3>调整并导出</h3>
-          <p>审阅结论、定制布局，交付 PDF 或 Word。</p>
+          <p>审阅结论、调整报告，并交付 PDF 或 Word。</p>
         </article>
       </div>
       <div class="prompt-example">
@@ -190,8 +190,8 @@
     <section class="section install-section" id="install" aria-labelledby="install-title">
       <div class="install-copy">
         <p class="section-index">03 / Install</p>
-        <h2 id="install-title">在现有 Agent 中立即开始。</h2>
-        <p>安装器会创建独立 Python 环境、下载完整的 Minitab 分析连接器，并自动注册 WorkBuddy、Codex、Cursor 与 Claude Desktop。</p>
+        <h2 id="install-title">接入现有 Agent，<br>不改变工作习惯。</h2>
+        <p>安装器会创建独立 Python 环境、下载 Minitab MCP，并自动注册 WorkBuddy、Codex、Cursor 与 Claude Desktop。</p>
         <div class="compatibility" aria-label="兼容客户端">
           <span>WorkBuddy</span>
           <span>Codex</span>

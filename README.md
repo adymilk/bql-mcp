@@ -1,6 +1,6 @@
 # BQL MCP 连接器
 
-世界首个基于 Minitab 的全功能 **MCP Server（stdio）**，通过 BQL 把 **110 个 Minitab 分析接口**接入任意 AI Agent。
+面向质量与制造团队的全功能 **Minitab MCP Server（stdio）**，通过 BQL 把 **110 个 Minitab 分析接口**接入任意 AI Agent。
 
 当前版本 **v1.3.3** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
 
