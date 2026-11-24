@@ -2,7 +2,7 @@
 
 世界首个基于 Minitab 的全功能 **MCP Server（stdio）**，通过 BQL 把 **110 个 Minitab 分析接口**接入任意 AI Agent。
 
-当前版本 **v1.3.2** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **v1.3.3** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 [官方网站](https://adymilk.github.io/bql-mcp/) · [快速安装](#一句话安装) · [功能说明](#工具一览)
 
@@ -27,10 +27,12 @@ curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/heads/main/install.sh | b
 curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/heads/main/install.sh | BQL_BASE_URL=https://your-bql-host BQL_TOKEN=your-token bash
 ```
 
-**装指定版本**（可复现部署 / 回滚）：
+安装器默认在每次运行时解析 `main` 的最新提交，不固定版本。
+
+**回滚到指定版本**（可选）：
 
 ```bash
-curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/heads/main/install.sh | BQL_VERSION=1.3.2 bash
+curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/heads/main/install.sh | BQL_VERSION=1.3.3 bash
 ```
 
 脚本会自动：下载连接器与报告模板 → 建 venv 装依赖（检测到 `uv` 时走极速安装）→ 写入配置 → 注册到 WorkBuddy / Cursor / Claude Desktop / Codex。

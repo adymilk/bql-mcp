@@ -1,21 +1,12 @@
 #!/usr/bin/env bash
 # BQL MCP Connector 一键安装脚本
 # 用法: curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/heads/main/install.sh | bash
-# 指定版本: BQL_VERSION=1.3.2 curl -fsSL .../install.sh | bash
+# 指定版本: BQL_VERSION=1.3.3 curl -fsSL .../install.sh | bash
 # 指定目录: BQL_MCP_DIR=/path curl -fsSL ... | bash -s -- <base_url> <token>
 set -euo pipefail
 
 REPO="https://github.com/adymilk/bql-mcp"
-REF="${BQL_REF:-${BQL_VERSION:+v${BQL_VERSION}}}"
-REF="${REF:-main}"
-if [[ "$REF" == v* ]]; then
-  RAW_REF="refs/tags/$REF"
-elif [[ "$REF" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
-  RAW_REF="$REF"
-else
-  RAW_REF="refs/heads/$REF"
-fi
-RAW="${BQL_RAW_BASE:-https://github.com/adymilk/bql-mcp/raw/$RAW_REF}"
+REQUESTED_REF="${BQL_REF:-${BQL_VERSION:+v${BQL_VERSION}}}"
 USER_HOME="${BQL_HOME:-$HOME}"
 DEST="${BQL_MCP_DIR:-$USER_HOME/.workbuddy/connectors/bql}"
 PY="${PYTHON:-python3}"
@@ -29,6 +20,28 @@ err() { printf '\033[1;31m[bql-mcp]\033[0m %s\n' "$*" >&2; }
 command -v "$PY" >/dev/null 2>&1 || { err "需要 Python 3，$PY 未找到"; exit 1; }
 command -v curl >/dev/null 2>&1 || { err "需要 curl，未找到"; exit 1; }
 "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' || { err "需要 Python 3.10+"; exit 1; }
+
+if [ -n "$REQUESTED_REF" ]; then
+  REF="$REQUESTED_REF"
+elif [ -z "${BQL_RAW_BASE:-}" ]; then
+  REF="$(
+    curl -fsSL -H 'Accept: application/vnd.github+json' \
+      https://api.github.com/repos/adymilk/bql-mcp/commits/main 2>/dev/null \
+      | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["sha"])' 2>/dev/null \
+      || true
+  )"
+else
+  REF="main"
+fi
+REF="${REF:-main}"
+if [[ "$REF" == v* ]]; then
+  RAW_REF="refs/tags/$REF"
+elif [[ "$REF" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+  RAW_REF="$REF"
+else
+  RAW_REF="refs/heads/$REF"
+fi
+RAW="${BQL_RAW_BASE:-https://raw.githubusercontent.com/adymilk/bql-mcp/$RAW_REF}"
 
 say "安装到 ${DEST}（来源 ${REF}）"
 mkdir -p "$DEST"
