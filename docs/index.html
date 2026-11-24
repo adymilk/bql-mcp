@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>世界首个 Minitab MCP 服务器 | BQL MCP</title>
+  <meta name="description" content="BQL MCP 是世界首个基于 Minitab 的 MCP 服务器，把过程能力分析、控制图与正态性检验接入 AI 工作流。">
+  <meta name="theme-color" content="#f7f8f5">
+  <meta property="og:title" content="世界首个 Minitab MCP 服务器 | BQL MCP">
+  <meta property="og:description" content="首个基于 Minitab 的 MCP 服务器。一句指令完成 SPC 分析，交付可编辑 PDF / Word 报告。">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://adymilk.github.io/bql-mcp/">
+  <meta property="og:image" content="https://adymilk.github.io/bql-mcp/assets/report-preview.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="BQL MCP 首页">
+      <span class="brand-mark" aria-hidden="true">BQL</span>
+      <span class="brand-name">BQL MCP</span>
+      <span class="version">v1.3.2</span>
+    </a>
+    <nav class="site-nav" aria-label="主导航">
+      <a href="#capabilities">能力</a>
+      <a href="#workflow">流程</a>
+      <a href="#install">安装</a>
+      <a class="nav-github" href="https://github.com/adymilk/bql-mcp" target="_blank" rel="noopener">
+        <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18">
+          <path d="M12 2C6.48 2 2 6.58 2 12.23c0 4.52 2.87 8.35 6.84 9.71.5.1.68-.22.68-.49v-1.9c-2.78.62-3.37-1.21-3.37-1.21-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.62.07-.62 1 .07 1.54 1.06 1.54 1.06.9 1.57 2.35 1.12 2.92.85.09-.66.35-1.12.64-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.33 9.33 0 0 1 12 6.94a9.3 9.3 0 0 1 2.5.35c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.8-4.57 5.05.36.32.68.95.68 1.91v2.79c0 .27.18.59.69.49A10.24 10.24 0 0 0 22 12.23C22 6.58 17.52 2 12 2Z" fill="currentColor"/>
+        </svg>
+        GitHub
+      </a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <aside class="announcement" aria-label="产品里程碑">
+      <span class="announcement-label">World's first</span>
+      <strong>首个基于 Minitab 的 MCP 服务器</strong>
+      <a href="#install">立即安装 <span aria-hidden="true">→</span></a>
+    </aside>
+
+    <section class="hero" id="top" aria-labelledby="hero-title">
+      <div class="hero-kicker">
+        <span class="status-dot" aria-hidden="true"></span>
+        Minitab MCP for Statistical Process Control
+      </div>
+      <h1 id="hero-title">
+        <span class="hero-line">世界首个 Minitab MCP 服务器</span>
+        <span class="hero-line accent">让 AI 直接交付 SPC 质量报告</span>
+      </h1>
+      <p class="hero-copy">
+        把 Minitab 的过程能力分析、控制图与正态性检验接入 AI 工作流。一句话完成分析，图表原样呈现，报告可调整布局并导出 PDF 或 Word。
+      </p>
+      <div class="agent-install">
+        <div class="agent-install-label">
+          <span>Copy for any Agent</span>
+          <strong>安装口令</strong>
+        </div>
+        <code id="agent-install-prompt">帮我安装 BQL MCP：执行 curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/tags/v1.3.2/install.sh | bash，然后注册 bql、运行 bql-mcp --self-check，并告诉我版本和配置状态。</code>
+        <button class="copy-button agent-copy" type="button" data-copy-target="agent-install-prompt" aria-label="复制 Agent 安装口令">
+          <svg class="icon-copy" aria-hidden="true" viewBox="0 0 20 20" width="18" height="18">
+            <rect x="6.5" y="5.5" width="9" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M4.5 13.5h-1v-9h9v1" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          </svg>
+          <svg class="icon-check" aria-hidden="true" viewBox="0 0 20 20" width="18" height="18">
+            <path d="m5 10 3 3 7-7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+          </svg>
+        </button>
+      </div>
+      <div class="hero-actions">
+        <a class="button button-primary" href="#install">
+          一键安装
+          <svg aria-hidden="true" viewBox="0 0 20 20" width="17" height="17">
+            <path d="M4 10h12M11 5l5 5-5 5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+          </svg>
+        </a>
+        <a class="button button-secondary" href="https://github.com/adymilk/bql-mcp" target="_blank" rel="noopener">
+          查看源码
+        </a>
+      </div>
+      <dl class="proof-grid" aria-label="产品概况">
+        <div>
+          <dt>110</dt>
+          <dd>Minitab 分析接口</dd>
+        </div>
+        <div>
+          <dt>12</dt>
+          <dd>MCP 工具</dd>
+        </div>
+        <div>
+          <dt>PDF / Word</dt>
+          <dd>可编辑报告导出</dd>
+        </div>
+        <div>
+          <dt>Local</dt>
+          <dd>报告留在本机</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="product-stage" aria-labelledby="preview-title">
+      <div class="window-bar" aria-hidden="true">
+        <div class="window-dots"><i></i><i></i><i></i></div>
+        <span>过程能力分析报告</span>
+        <span class="window-status"><i></i>过程受控</span>
+      </div>
+      <div class="preview-frame">
+        <img src="assets/report-preview.png" alt="BQL MCP 生成的过程能力分析报告，首屏展示放行结论、Cpk、Ppk 和 Minitab 能力分析图" width="1440" height="1100">
+      </div>
+      <div class="preview-caption">
+        <span id="preview-title">真实分析报告</span>
+        <span>决策结论 + SPC 证据 + 完整 Minitab 输出</span>
+      </div>
+    </section>
+
+    <section class="section capabilities" id="capabilities" aria-labelledby="capabilities-title">
+      <div class="section-heading">
+        <p class="section-index">01 / 核心能力</p>
+        <h2 id="capabilities-title">从分析到报告，只保留关键动作</h2>
+        <p>把专业 SPC 判断编排进结果，不让用户在一堆参数和图表里寻找答案。</p>
+      </div>
+      <div class="feature-grid">
+        <article class="feature">
+          <div class="feature-icon blue" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24">
+              <path d="M4 19V9m6 10V5m6 14v-7m4 7H2" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/>
+            </svg>
+          </div>
+          <h3>Minitab 原生分析</h3>
+          <p>通过 BQL 接入 Minitab 引擎，能力分析、控制图与正态性检验并行执行，按专业顺序生成结论。</p>
+        </article>
+        <article class="feature">
+          <div class="feature-icon green" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24">
+              <rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M8 9h8M8 13h5M8 17h7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/>
+            </svg>
+          </div>
+          <h3>报告可以真正交付</h3>
+          <p>标题、工程师结论、区块顺序都可调整；布局可保存复用，并直接导出 PDF 或 Word。</p>
+        </article>
+        <article class="feature">
+          <div class="feature-icon amber" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24">
+              <path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"/>
+              <path d="m9 12 2 2 4-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+            </svg>
+          </div>
+          <h3>本地工作台，链接稳定</h3>
+          <p>报告服务与 MCP 分析进程分离，使用本地权限令牌。MCP 重连后，已有报告仍可访问和编辑。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section workflow" id="workflow" aria-labelledby="workflow-title">
+      <div class="section-heading compact">
+        <p class="section-index">02 / 工作方式</p>
+        <h2 id="workflow-title">把一句自然语言变成一份质量决策</h2>
+      </div>
+      <div class="workflow-grid">
+        <article>
+          <span>1</span>
+          <h3>描述问题</h3>
+          <p>提供测量值、规格上下限和子组大小。</p>
+        </article>
+        <article>
+          <span>2</span>
+          <h3>Agent 调用 BQL</h3>
+          <p>通过标准 MCP 工具执行 Minitab 分析。</p>
+        </article>
+        <article>
+          <span>3</span>
+          <h3>调整并导出</h3>
+          <p>审阅结论、定制布局，交付 PDF 或 Word。</p>
+        </article>
+      </div>
+      <div class="prompt-example">
+        <span class="prompt-label">你可以这样说</span>
+        <p>“分析这组关键尺寸数据，规格 45–55，目标 50，子组 5。给出放行结论并生成可编辑报告。”</p>
+      </div>
+    </section>
+
+    <section class="section install-section" id="install" aria-labelledby="install-title">
+      <div class="install-copy">
+        <p class="section-index">03 / 一键安装</p>
+        <h2 id="install-title">在现有 AI Agent 里直接开始</h2>
+        <p>安装器会创建独立 Python 环境、下载报告模板，并自动注册 WorkBuddy、Codex、Cursor 与 Claude Desktop。</p>
+        <div class="compatibility" aria-label="兼容客户端">
+          <span>WorkBuddy</span>
+          <span>Codex</span>
+          <span>Cursor</span>
+          <span>Claude Desktop</span>
+        </div>
+      </div>
+      <div class="install-panel">
+        <div class="install-panel-head">
+          <span>macOS / Linux</span>
+          <span class="release-tag">v1.3.2</span>
+        </div>
+        <div class="command-box">
+          <code id="install-command">curl -fsSL https://github.com/adymilk/bql-mcp/raw/refs/tags/v1.3.2/install.sh | bash</code>
+          <button class="copy-button" type="button" data-copy-target="install-command" aria-label="复制安装命令">
+            <svg class="icon-copy" aria-hidden="true" viewBox="0 0 20 20" width="18" height="18">
+              <rect x="6.5" y="5.5" width="9" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M4.5 13.5h-1v-9h9v1" fill="none" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
+            <svg class="icon-check" aria-hidden="true" viewBox="0 0 20 20" width="18" height="18">
+              <path d="m5 10 3 3 7-7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+            </svg>
+          </button>
+        </div>
+        <ol class="install-notes">
+          <li>需要 Python 3.10+ 与 curl。</li>
+          <li>安装完成会打开本地配置页，填写 BQL 地址与个人 Token。</li>
+          <li>在 Agent 连接器设置中信任 bql，然后直接发起分析。</li>
+        </ol>
+        <a class="text-link" href="https://github.com/adymilk/bql-mcp#readme" target="_blank" rel="noopener">
+          阅读完整安装说明
+          <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div>
+      <a class="brand footer-brand" href="#top">
+        <span class="brand-mark" aria-hidden="true">BQL</span>
+        <span class="brand-name">BQL MCP</span>
+      </a>
+      <p>AI 原生的 SPC 质量分析连接器。</p>
+    </div>
+    <nav aria-label="页脚导航">
+      <a href="https://github.com/adymilk/bql-mcp" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/adymilk/bql-mcp/blob/main/README.md" target="_blank" rel="noopener">文档</a>
+      <a href="https://github.com/adymilk/bql-mcp/blob/main/CHANGELOG.md" target="_blank" rel="noopener">更新记录</a>
+    </nav>
+    <p class="copyright">© <span id="year">2026</span> BQL MCP</p>
+  </footer>
+</body>
+</html>

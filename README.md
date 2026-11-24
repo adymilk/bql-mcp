@@ -1,8 +1,10 @@
 # BQL MCP 连接器
 
-一个标准 **MCP Server（stdio）**，把 BQL 的分析接口包装成通用 Agent 可直接对话调用的质量分析工具。
+世界首个基于 Minitab 的 **MCP Server（stdio）**，通过 BQL 把 Minitab 质量分析接入任意 AI Agent。
 
 当前版本 **v1.3.2** · 110 个分析接口 · 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
+
+[官方网站](https://adymilk.github.io/bql-mcp/) · [快速安装](#一句话安装) · [功能说明](#工具一览)
 
 > 装完会自动在浏览器打开本地配置页（`http://127.0.0.1:<port>/settings?token=…`）；
 > 想再打开：`~/.workbuddy/connectors/bql/bql-mcp --settings`（`--no-open` 只打印地址不弹窗）。
